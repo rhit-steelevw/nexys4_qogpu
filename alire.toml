@@ -1,0 +1,26 @@
+name = "nexys4"
+description = "Nexys 4 board support: GHAL generic instances on NEORV32"
+version = "0.1.0-dev"
+
+authors = ["Olivier Henley"]
+maintainers = ["Olivier Henley <olivier.henley@gmail.com>"]
+maintainers-logins = ["ohenley"]
+licenses = "MIT OR Apache-2.0 WITH LLVM-exception"
+website = "https://github.com/GNAT-Academic-Program/nexys4"
+tags = ["embedded", "neorv32", "riscv", "fpga", "nexys4", "bare-metal"]
+
+[[depends-on]]
+neorv32               = "*"
+light_tasking_neorv32 = "*"
+debug_generic         = "*"
+
+# The neorv32_nexys4 SoC runs at 100 MHz. The drivers read the clock from
+# SYSINFO at run time, but the runtime needs it at build time for its timer.
+# Memory sizes and the console baud rate are the runtime defaults.
+[configuration.values]
+light_tasking_neorv32.Clock_Frequency = 100000000
+
+[[pins]]
+neorv32               = { url = "https://github.com/GNAT-Academic-Program/neorv32_ghal.git", branch = "main" }
+light_tasking_neorv32 = { url = "https://github.com/GNAT-Academic-Program/light_tasking_neorv32.git", branch = "main" }
+debug_generic         = { url = "https://github.com/GNAT-Academic-Program/debug_generic.git", branch = "main" }
