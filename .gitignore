@@ -2,3 +2,18 @@
 /lib/
 /alire/
 /config/
+
+# Vivado / xsim outputs
+/build/
+.Xil/
+xsim.dir/
+*.wdb
+vivado*.log
+webtalk*
+
+# xsim run directly from the repo root
+xvhdl.log
+xelab.log
+xsim.log
+xsim*.jou
+*.pb

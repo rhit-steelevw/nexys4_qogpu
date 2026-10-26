@@ -1,0 +1,50 @@
+# Run one VHDL tb in Vivado xsim with no GUI
+# To use:
+#   vivado -mode batch -nojournal -nolog -notrace -source scripts/sim.tcl \
+#       -tclargs <tb> <src_1.vhd> [<src_2.vhd> ...]
+# Sources are compiled in order given
+#
+# Pass/fail rule: testbench must print "<tb>: ALL TSTS PASSED"
+# Anything else exits wiht code 1
+# Outputs go to build/sim/<tb>/
+
+if {[llength $argv] < 2} {
+    puts "usage: -tclargs <tb> <src.vhd ..."
+    exit 2
+}
+set top [lindex $argv 0]
+set repo [file normalize [file join [file dirname [info script]] ..]]
+set srcs {}
+foreach f [lrange $argv 1 end] {
+    lappend srcs [file normalize [file join $repo $f]]
+}
+set run_dir [file join $repo build sim $top]
+file delete -force $run_dir
+file mkdir $run_dir
+cd $run_dir
+
+set ext [expr {$::tcl_platform(platform) eq "windows" ? ".bat" : ""}]
+
+proc step {name args} {
+    puts "== $name"
+    if {[catch {exec -ignorestderr {*}$args} out]} {
+        puts $out
+        puts "FAIL: $name failed (see logs in [pwd])"
+        exit 1
+    }
+}
+
+step xvhdl xvhdl$ext --2008 {*}$srcs
+step xelab xelab$ext -debug off -s ${top}_sim work.$top
+# xsim might exit 0 even after a failed assert, so check logs
+catch {exec -ignorestderr xsim$ext ${top}_sim -runall -log xsim.log} out]}
+
+set fh [open xsim.log r]
+set log [read $fh]
+close $fh 
+if {[string first "$top: ALL TESTS PASSED" $log] >= 0} {
+    puts "PASS: $top"
+    exit 0
+}
+puts $log]puts "FAIL: $top (no pass line. Log in [file join $run_dir xsim.log])"
+exit 1
