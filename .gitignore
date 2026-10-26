@@ -17,3 +17,4 @@ xelab.log
 xsim.log
 xsim*.jou
 *.pb
+xsim*.backup.log

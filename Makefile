@@ -1,7 +1,7 @@
 # Wrapper around Vivado batch TCL  scripts
 # Need Vivado on $PATH
 
-VIVADO ?= Vivado
+VIVADO ?= vivado
 VBATCH = $(VIVADO) -mode batch -nojournal -nolog -notrace
 
 FB_SRCS = rtl/qogpu_pkg.vhd rtl/framebuffer.vhd
@@ -25,4 +25,4 @@ synth-framebuffer-35t:
 build:
 
 clean:
-	rm -rf build .xil
+	rm -rf build .Xil
