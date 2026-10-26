@@ -6,13 +6,16 @@ VBATCH = $(VIVADO) -mode batch -nojournal -nolog -notrace
 
 FB_SRCS = rtl/qogpu_pkg.vhd rtl/framebuffer.vhd
 
-.PHONY: sim sim-framebuffer synth-framebuffer synth-framebuffer-35t build clean
+.PHONY: sim sim-framebuffer sim-counter synth-framebuffer synth-framebuffer-35t build clean
 
 # all tb, add each new sim-* targ here
-sim: sim-framebuffer
+sim: sim-framebuffer sim-counter
 
 sim-framebuffer:
 	$(VBATCH) -source scripts/sim.tcl -tclargs framebuffer_tb $(FB_SRCS) tb/framebuffer_tb.vhd
+
+sim-counter:
+	$(VBATCH) -source scripts/sim.tcl -tclargs counter_tb rtl/counter.vhd tb/counter_tb.vhd
 
 # NEXYS A7-100T (MVP demo)
 synth-framebuffer:
