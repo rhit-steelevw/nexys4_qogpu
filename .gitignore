@@ -2,3 +2,8 @@
 /lib/
 /alire/
 /config/
+build/*
+!build/.gitkeep
+*.jou
+*.log
+.Xil/
