@@ -27,7 +27,7 @@ begin
   process (clk_i)
   begin
     if rising_edge(clk_i) then
-      -- translate_off
+      -- synthesis translate_off
       assert wr_en_i /= '1' or to_integer(wr_addr_i) < FB_PIXELS
         report "framebuffer: write addr " & integer'image(to_integer(wr_addr_i)) &
           " out of range (max " & integer'image(FB_PIXELS - 1) & ")"
@@ -36,7 +36,7 @@ begin
         report "framebuffer: read addr " & integer'image(to_integer(rd_addr_i)) &
           " out of range (max " & integer'image(FB_PIXELS - 1) & ")"
         severity failure;
-      -- translate_on
+      -- synthesis translate_on
       if wr_en_i = '1' then
         mem(to_integer(wr_addr_i)) <= wr_data_i;
       end if;

@@ -21,7 +21,7 @@ synth_design -top $top -part $part -mode out_of_context
 create_clock -name clk -period $period [get_ports $clk_port]
 
 report_utilization      -file [file join $out_dir utilization.rpt]
-report_timing_summary   -file [file join $out_dir timing_summar.rpt]
+report_timing_summary   -file [file join $out_dir timing_summary.rpt]
 
 set n36 [llength [get_cells -hier -quiet -filter {REF_NAME =~ RAMB36*}]]
 set n18 [llength [get_cells -hier -quiet -filter {REF_NAME =~ RAMB18*}]]
@@ -29,6 +29,6 @@ set nlut [llength [get_cells -hier -quiet -filter {REF_NAME =~ LUT*}]]
 set path [get_timing_paths -setup -max_paths 1 -nworst 1]
 set wns [expr {[llength $path] ? [get_property SLACK $path] : "n/a"}]
 
-puts "RESULT: $top on $part: RAMB36$n36 RAMB18=$n18 LUT=$nlut WNS=${wns} ns at ${period} ns"
+puts "RESULT: $top on $part: RAMB36=$n36 RAMB18=$n18 LUT=$nlut WNS=${wns} ns at ${period} ns"
 puts "Reports: $out_dir"
 exit 0

@@ -63,7 +63,7 @@ begin
     assert 2**FB_ADDR_W >= FB_PIXELS and 2**(FB_ADDR_W - 1) < FB_PIXELS
       report "FB_ADDR_W does not match FB_PIXELS" severity failure;
     -- fb_addr: every (x,y) maps to y * FB_W + x
-    for y in 0 to FB_H - 1loop
+    for y in 0 to FB_H - 1 loop
       for x in 0 to FB_W - 1 loop
         assert to_integer(fb_addr(to_unsigned(x, FB_X_W), to_unsigned(y, FB_Y_W))) = y * FB_W + x
           report "fb_addr(" & integer'image(x) & "," & integer'image(y) & ") = " &

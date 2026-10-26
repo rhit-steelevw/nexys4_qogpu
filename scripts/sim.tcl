@@ -37,12 +37,12 @@ proc step {name args} {
 step xvhdl xvhdl$ext --2008 {*}$srcs
 step xelab xelab$ext -debug off -s ${top}_sim work.$top
 # xsim might exit 0 even after a failed assert, so check logs
-catch {exec -ignorestderr xsim$ext ${top}_sim -runall -log xsim.log} out]}
+catch {exec -ignorestderr xsim$ext ${top}_sim -runall -log xsim.log} out
 
 set fh [open xsim.log r]
 set log [read $fh]
 close $fh 
-if {[string first "$top: ALL TESTS PASSED" $log] >= 0} {
+if {[string first "$top: ALL TESTS PASSED" $log >= 0} {
     puts "PASS: $top"
     exit 0
 }
