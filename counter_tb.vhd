@@ -56,7 +56,7 @@ begin
             clk <= '0'; --set clock to low again
         end loop;
 
-        report "PASS: all 20 cycles checked (reset, hold, increment)";
+        report "counter_tb: ALL TESTS PASSED";
         finish(0);
         wait;
     end process;

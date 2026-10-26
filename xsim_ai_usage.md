@@ -1,12 +1,6 @@
-Used AI to help with the simulation runner, how-to documentation, and verification notes.
+AI assistance disclosure
+AI helped with the original standalone simulation runner, Makefile, how-to, and verification notes.
 
-Simulation Runner:
-scripts/sim_counter.tcl
-It automatically:
-1. Compiles VHDL files.
-2. Builds the simulation.
-3. Runs the testbench.
-4. Checks for PASS or failure and returns 0 or 1.
+AI explained port map, testbench signals, and the difference between := and <=.
 
-Used AI to understand how port map connects the testbench signals to the counter’s inputs and output. 
-Used AI to understand why the testbench needs its own signals and how := differs from <=.
+The new reviewed integration uses the team's existing shared scripts/sim.tcl and main-branch Makefile; those team files are not attributed to AI.

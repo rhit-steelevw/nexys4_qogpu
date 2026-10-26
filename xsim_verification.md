@@ -1,41 +1,17 @@
-Verified on 2026-10-25 on this Windows computer.
-Installation: C:\Xilinx\Vivado\2024.2
-Vivado v2024.2 (64-bit), SW Build 5239630 (Nov 08 2024).
-Vivado Simulator v2024.2.0.
+Counter simulation verification
+Current shared-runner status — PENDING
+No new shared scripts/sim.tcl, fresh-clone, or make sim-counter run has been verified. GNU Make was previously missing from PATH. Historical standalone results below do not validate the current integration.
 
-Observed process results:
-1. Initial working simulation: exit 0; PASS at 201 ns.
-2. Intentional assertion mismatch: replaced the cycle assertion's
-   to_unsigned(expected, 8) with to_unsigned(expected + 1, 8).
-   Assertion failed at cycle 1, time 7 ns. xsim itself exited 0.
-   Final Tcl failure guard rejected the log and outer Vivado exited 1.
-   Original testbench was restored immediately after the run.
-3. Restored final source with failure guard: exit 0; PASS at 201 ns.
-4. Same source in "space path check\xsim starter": exit 0;
-   PASS at 201 ns. Confirms project paths containing spaces.
-5. xvhdl -help: exit 0. It lists --2008 and states that double-dash
-   switches may also be used with a single dash. Actual builds used --2008.
+Next: configure GNU Make and Vivado, run make sim-counter from a fresh checkout, and immediately record its exit code. Confirm PASS: counter_tb, exit 0, and counter_tb: ALL TESTS PASSED in build/sim/counter_tb/xsim.log. Record the revision, tool versions, and fresh logs.
 
-The command used for the restored final source (from project root):
-"C:\Xilinx\Vivado\2024.2\bin\vivado.bat" -mode batch -source scripts/sim_counter.tcl -log build/final-pass.log -journal build/final-pass.jou
+The shared runner checks the success substring without independently scanning error markers; it has no Windows wrapper. Historical failure-guard/path tests do not apply to it. Hardening is deferred to a follow-up PR.
+Historical standalone tests — 2026-10-25
+Environment: Windows, C:\Xilinx\Vivado\2024.2; Vivado v2024.2, SW Build 5239630; Simulator v2024.2.0. These tests used the former xsim-starter workspace and scripts/sim_counter.tcl wrapper.
+1. Initial simulation: exit 0; PASS at 201 ns.
+2. Intentional mismatch (expected + 1): assertion failed at cycle 1, 7 ns. xsim returned 0; the old failure guard made outer Vivado return 1. Original testbench restored immediately afterward.
+3. Restored source: exit 0; PASS at 201 ns.
+4. Copy under space path check\xsim starter: exit 0; PASS at 201 ns.
+5. xvhdl -help: exit 0; documented --2008 and single-dash equivalents. Builds used --2008.
+Historical success text: Note: PASS: all 20 cycles checked (reset, hold, increment).
 
-PASS text:
-Note: PASS: all 20 cycles checked (reset, hold, increment)
-
-Coverage: initial asynchronous reset, reset on cycles 1-2 and 15,
-increments, enable hold on cycles 8-9, all 20 rising-edge values.
-Not covered: 255-to-0 rollover, unknown inputs, timing on a physical board.
-GNU Make not found on PATH; optional Makefile target not executed.
-No GUI, board programming, installations, persistent PATH edits,
-existing repository changes, commits, pushes, or PRs.
-
-Full test logs are retained locally in the project's build folder;
-generated build outputs are intentionally excluded from the ZIP.
-
-Runner troubleshooting during development:
-- Restricted sandbox could not enter Vivado's installation directory;
-  approved elevated execution successfully ran the installed tools.
-- First nested cmd quoting attempt exited 1; corrected by generating a
-  small run_tool.cmd file inside build. All simulations above used the fix.
-- vivado -version printed the version but returned 1; actual batch
-  simulations, not the version command, establish successful operation.
+Coverage: initial asynchronous reset, reset on cycles 1–2 and 15, increments, hold on cycles 8–9, and all 20 rising-edge values. Rollover, unknown inputs, and physical-board timing were not covered. The required Makefile target was not executed.
