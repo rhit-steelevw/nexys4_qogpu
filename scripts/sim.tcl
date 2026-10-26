@@ -41,10 +41,11 @@ catch {exec -ignorestderr xsim$ext ${top}_sim -runall -log xsim.log} out
 
 set fh [open xsim.log r]
 set log [read $fh]
-close $fh 
-if {[string first "$top: ALL TESTS PASSED" $log >= 0} {
+close $fh
+if {[string first "$top: ALL TESTS PASSED" $log] >= 0} {
     puts "PASS: $top"
     exit 0
 }
-puts $log]puts "FAIL: $top (no pass line. Log in [file join $run_dir xsim.log])"
+puts $log
+puts "FAIL: $top (no pass line. Log in [file join $run_dir xsim.log])"
 exit 1
