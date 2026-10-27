@@ -1,29 +1,51 @@
-Counter simulation verification
-Current shared-runner status - PASSED
+# Counter simulation verification
 
-Verified on Windows on 2026-10-26 using Vivado 2024.2 and GNU Make 4.4.1.
+| Item | Value |
+|---|---|
+| Status | Pass run recorded; failure run and clean-clone check pending (see below) |
+| Date | 2026-10-26 |
+| OS | Windows 11 Enterprise 10.0.26100 |
+| Vivado / xsim | 2024.2 (SW Build 5239630) |
+| Make | GNU Make 4.4.1 |
+| Code commit | PENDING: fill in after the current `rtl/counter.vhd` and `tb/counter_tb.vhd` changes are committed |
 
-A fresh clone of local branch alex/rq85-clean, commit 6e46c76, was created in C:\\Users\\freelal\\rq85-check using git clone --no-local. No previous build outputs were copied.
+## Pass run
 
-Command: make sim-counter
+Command: `make sim-counter`
 
-Result: PASS: counter\_tb
+Output: `PASS: counter_tb`
 
 Exit code: 0
 
-After the run, git status --short produced no output.
+Run on a copy of the working tree (Makefile, scripts, rtl, tb), not a fresh clone, because the code changes are not committed yet.
 
-This verifies the shared-runner success path. The intentional failure test below was performed with the old standalone runner, not the shared script.
+Clean git status: PENDING. Repeat from a fresh `git clone --no-local` of the commit above and record that `git status --short` prints nothing.
 
-Historical standalone tests — 2026-10-25
-Environment: Windows, C:\\Xilinx\\Vivado\\2024.2; Vivado v2024.2, SW Build 5239630; Simulator v2024.2.0. These tests used the former xsim-starter workspace and scripts/sim\_counter.tcl wrapper.
+## Failure run (shared runner)
 
-1. Initial simulation: exit 0; PASS at 201 ns.
-2. Intentional mismatch (expected + 1): assertion failed at cycle 1, 7 ns. xsim returned 0; the old failure guard made outer Vivado return 1. Original testbench restored immediately afterward.
-3. Restored source: exit 0; PASS at 201 ns.
-4. Copy under space path check\\xsim starter: exit 0; PASS at 201 ns.
-5. xvhdl -help: exit 0; documented --2008 and single-dash equivalents. Builds used --2008.
-Historical success text: Note: PASS: all 20 cycles checked (reset, hold, increment).
+PENDING. Plan: in a scratch copy, change `expected + 1` to `expected + 2` in `tb/counter_tb.vhd`, run `make sim-counter`, and record the assertion text, the printed result and a nonzero exit code. Restore the file afterward.
 
-Coverage: initial asynchronous reset, reset on cycles 1–2 and 15, increments, hold on cycles 8–9, and all 20 rising-edge values. Rollover, unknown inputs, and physical-board timing were not covered. The Makefile target was not executed during the October 25 tests; it passed on October 26 as recorded above.
+## Coverage
 
+Checked every cycle against a reference model, 280 cycles:
+
+- Power-on asynchronous reset (q is 0 before any clock edge).
+- Mid-run asynchronous reset (cycle 15: q is 0 before the clock edge, with a guard that the count was nonzero).
+- Reset over enable (`rst_n = '0'` with `en = '1'` must give 0).
+- Hold (`en = '0'`, cycles 8-9).
+- Resume after hold.
+- Rollover (255 to 0, via `mod 256` in the model).
+
+Not covered:
+
+- X or unknown inputs.
+- Timing on hardware (simulation is functional only; no board run).
+
+## Historical tests (old standalone runner, 2026-10-25)
+
+These used the former xsim-starter workspace and the `scripts/sim_counter.tcl` wrapper, not the shared runner or the current testbench (20 cycles, old port names).
+
+- Initial simulation: exit 0, PASS at 201 ns.
+- Intentional mismatch (expected + 1): assertion failed at cycle 1, 7 ns. xsim returned 0; the old failure guard made the outer Vivado return 1. Testbench restored afterward.
+- Restored source: exit 0, PASS at 201 ns.
+- Run from a path containing spaces: exit 0, PASS.
