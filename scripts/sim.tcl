@@ -4,8 +4,8 @@
 #       -tclargs <tb> <src_1.vhd> [<src_2.vhd> ...]
 # Sources are compiled in order given
 #
-# Pass/fail rule: testbench must print "<tb>: ALL TSTS PASSED"
-# Anything else exits wiht code 1
+# Pass/fail rule: testbench must print "<tb>: ALL TESTS PASSED"
+# Anything else exits with code 1
 # Outputs go to build/sim/<tb>/
 
 if {[llength $argv] < 2} {

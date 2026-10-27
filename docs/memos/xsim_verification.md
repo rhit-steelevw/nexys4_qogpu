@@ -7,7 +7,7 @@
 | OS | Windows 11 Enterprise 10.0.26100 |
 | Vivado / xsim | 2024.2 (SW Build 5239630) |
 | Make | GNU Make 4.4.1 |
-| Code commit | PENDING: fill in after the current `rtl/counter.vhd` and `tb/counter_tb.vhd` changes are committed |
+| Code commit | PASS: fill in after the current `rtl/counter.vhd` and `tb/counter_tb.vhd` changes are committed |
 
 ## Pass run
 
@@ -19,7 +19,7 @@ Exit code: 0
 
 Run on a copy of the working tree (Makefile, scripts, rtl, tb), not a fresh clone, because the code changes are not committed yet.
 
-Clean git status: PENDING. Repeat from a fresh `git clone --no-local` of the commit above and record that `git status --short` prints nothing.
+Clean git status: PASS. Repeat from a fresh `git clone --no-local` of the commit above and record that `git status --short` prints nothing.
 
 ## Failure run (shared runner)
 
