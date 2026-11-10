@@ -53,3 +53,15 @@ gnatmake -gnat2012 -Isw/ada/ref/src sw/ada/tools/check_scenes.adb -o check_scene
 The checker verifies the fixture's 1,024 words, including its vertex data and face indices. It reports expected screen coordinates and depths; it does not test hardware rendering.
 
 Face colors and vertex/face counts are not encoded in this file. The unused vertex attributes, including TextureID, are zero. The final scene-input, color, and count interfaces still need to be confirmed before integration.
+
+## Test with asset memory
+
+From the repository root, run:
+
+```powershell
+xvhdl --2008 rtl/asset_memory.vhd tb/asset_memory_scene_tb.vhd
+xelab asset_memory_scene_tb -s asset_memory_scene_sim
+xsim asset_memory_scene_sim -runall
+```
+
+The testbench checks all 1,024 words read by `asset_memory` against the expected fixture values. It does not test Block A's scene input, Block B, color handling, or rendered output.
