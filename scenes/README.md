@@ -39,3 +39,17 @@ The memory file uses the existing 1,024-word binary asset layout.
 The first six vertex records and first two face records contain this scene.
 Unused words are zero. Face colors and the two-face count are not yet
 encoded because their interface has not been established.
+
+## Generate and check the fixture
+
+Run these commands from the repository root:
+
+```powershell
+python scenes/generate_two_triangles.py
+gnatmake -gnat2012 -Isw/ada/ref/src sw/ada/tools/check_scenes.adb -o check_scenes.exe
+.\check_scenes.exe scenes/scene_two_triangles.mem
+```
+
+The checker verifies the fixture's 1,024 words, including its vertex data and face indices. It reports expected screen coordinates and depths; it does not test hardware rendering.
+
+Face colors and vertex/face counts are not encoded in this file. The unused vertex attributes, including TextureID, are zero. The final scene-input, color, and count interfaces still need to be confirmed before integration.
