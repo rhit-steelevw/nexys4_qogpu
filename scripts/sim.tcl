@@ -3,6 +3,11 @@
 #   vivado -mode batch -nojournal -nolog -notrace -source scripts/sim.tcl \
 #       -tclargs <tb> <src_1.vhd> [<src_2.vhd> ...]
 # Sources are compiled in order given
+# Generics are not passed on the command line: on Windows the Vivado .bat
+# launchers split arguments at '=', so a testbench that needs another
+# generic value gets a small wrapper entity (see tb/mem_ctrl_bram_w16_tb.vhd)
+# Files in tb/vectors/ are copied into the run directory, so a testbench
+# opens them by bare file name
 #
 # Pass/fail rule: testbench must print "<tb>: ALL TESTS PASSED"
 # Anything else exits with code 1
@@ -26,6 +31,9 @@ file mkdir [file join $run_dir data]
 file copy -force \
     [file join $repo rtl data cube_init.txt] \
     [file join $run_dir data cube_init.txt]
+foreach v [glob -nocomplain -directory [file join $repo tb vectors] *.txt *.csv] {
+    file copy -force $v $run_dir
+}
 cd $run_dir
 
 set ext [expr {$::tcl_platform(platform) eq "windows" ? ".bat" : ""}]

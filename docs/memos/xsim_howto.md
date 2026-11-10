@@ -1,6 +1,6 @@
 # Counter simulation
 
-Run the 8-bit counter testbench with Vivado Simulator (xsim); no FPGA board is required. The testbench checks asynchronous active-low reset, enabled increments, and disabled hold behavior over 20 cycles.
+Run the 8-bit counter testbench with Vivado Simulator (xsim); no FPGA board is required. The testbench checks asynchronous active-low reset, enabled increments, disabled hold behavior, and 8-bit rollover over 280 cycles.
 
 # Prerequisites
 
@@ -69,3 +69,7 @@ xsim counter_tb_sim -runall -log xsim.log
 - The runner checks for the final-report substring, not separate error markers.
 - There is no Windows wrapper.
 - The shared-runner success path passed a fresh-clone test on 2026-10-26.
+
+# Other testbenches
+
+The framebuffer dump and PPM converter are described in `frame_dump.md`.
