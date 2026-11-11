@@ -65,3 +65,9 @@ xsim asset_memory_scene_sim -runall
 ```
 
 The testbench checks all 1,024 words read by `asset_memory` against the expected fixture values. It does not test Block A's scene input, Block B, color handling, or rendered output.
+
+Synthetic image preview
+
+The Ada preview reads the two-triangle scene and uses temporary green and blue colors to create an image. It checks that the green triangle stays in front where they overlap.
+
+This is a software preview, not a GPU hardware test. The final color mapping will be connected to Connor’s work later. Connor still needs to confirm the scene loading setup.
