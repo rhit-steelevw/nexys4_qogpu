@@ -83,10 +83,10 @@ architecture rtl of raster_scan is
   end function;
 
   -- rule 11: every E_i > 0, or E_i = 0 on a top-left edge
-  function is_covered(e : e_arr3_t; tl : std_logic_vector(2 downto 0)) return boolean is
+  function is_covered(ev : e_arr3_t; tl : std_logic_vector(2 downto 0)) return boolean is
   begin
     for i in 0 to 2 loop
-      if e(i) < 0 or (e(i) = 0 and tl(i) = '0') then
+      if ev(i) < 0 or (ev(i) = 0 and tl(i) = '0') then
         return false;
       end if;
     end loop;

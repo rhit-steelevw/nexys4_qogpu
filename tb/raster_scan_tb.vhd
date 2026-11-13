@@ -8,6 +8,7 @@
 -- DUT output n, in order: px, py, E0..E2, kill = not covered.
 -- Tri 7 (empty, sent with last = 1): exactly one marker, kill = eot = eof = 1.
 -- Back-pressure: out_ready is low 3 of every 7 clocks for the whole run.
+-- Reset in the middle of triangle 1, then triangle 1 again.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -61,7 +62,7 @@ begin
         assert scan = prev
           report "raster_scan_tb: out_scan_o changed while stalled" severity failure;
       end if;
-      held := out_valid = '1' and out_ready = '0';
+      held := out_valid = '1' and out_ready = '0' and rst_n = '1';
       prev := scan;
     end if;
   end process;
@@ -87,6 +88,11 @@ begin
     variable ecov : std_logic;
     variable is_eot : std_logic;
     variable pixels, expected, errors : natural := 0;
+    variable t1 : tri_t;
+    variable first_px : fb_x_t;
+    variable first_py : fb_y_t;
+    variable first_e  : e_arr3_t;
+    variable have_first : boolean := false;
 
     procedure fail(msg : string) is
     begin
@@ -120,6 +126,7 @@ begin
     for k in 1 to N_DIRECTED loop
       next_data_line(fs, ls, ok_s);
       read_setup_row(ls, n_tri, t);
+      if n_tri = 1 then t1 := t; end if;
 
       in_tri <= t; in_valid <= '1';
       wait until rising_edge(clk) and in_ready = '1';
@@ -146,6 +153,10 @@ begin
           else
             wait until rising_edge(clk) and out_valid = '1' and out_ready = '1';
             pixels := pixels + 1;
+            if n_tri = 1 and not have_first then
+              first_px := epx; first_py := epy; first_e := ee;
+              have_first := true;
+            end if;
             if scan.px /= epx or scan.py /= epy then
               fail("tri " & integer'image(n_tri) & ": pixel (" &
                    integer'image(to_integer(scan.px)) & "," & integer'image(to_integer(scan.py)) &
@@ -182,6 +193,32 @@ begin
     end loop;
     file_close(fs);
     file_close(fe);
+
+    -- reset in the middle of a triangle, then triangle 1 again
+    in_tri <= t1; in_valid <= '1';
+    wait until rising_edge(clk) and in_ready = '1';
+    in_valid <= '0';
+    for k in 1 to 10 loop
+      wait until rising_edge(clk);
+    end loop;
+    if in_ready /= '0' then
+      fail("reset test: triangle finished before the reset");
+    end if;
+    rst_n <= '0';
+    wait until rising_edge(clk);
+    wait until rising_edge(clk);
+    rst_n <= '1';
+    wait until rising_edge(clk);
+    if out_valid /= '0' or in_ready /= '1' then
+      fail("reset test: DUT not idle after reset");
+    end if;
+    in_tri <= t1; in_valid <= '1';
+    wait until rising_edge(clk) and in_ready = '1';
+    in_valid <= '0';
+    wait until rising_edge(clk) and out_valid = '1' and out_ready = '1';
+    if scan.px /= first_px or scan.py /= first_py or scan.e /= first_e then
+      fail("reset test: first pixel of triangle 1 wrong after reset");
+    end if;
 
     if errors = 0 and pixels = expected and pixels > 0 then
       report "raster_scan_tb: " & integer'image(pixels) & " pixels bit-exact with the Ada reference";

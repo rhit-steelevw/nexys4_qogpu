@@ -4,7 +4,8 @@
 --   interp.csv -> expected depth, same order as the covered rows of edge.csv
 -- Run "make vectors" first. INTERP = true, DEPTH_W = 8 (Ada Interp_Z is D = 8).
 --
--- Also checks: a killed row without eot/eof is dropped (no output); a killed
+-- out_ready is low 3 of every 7 clocks, and the output must hold while stalled.
+-- Also checks: reset in the middle of a division, a killed row without eot/eof is dropped (no output); a killed
 -- row with eot is sent with kill = 1.
 library ieee;
 use ieee.std_logic_1164.all;
@@ -32,6 +33,7 @@ architecture sim of depth_interp_tb is
   signal o_z    : unsigned(7 downto 0);
   signal o_kill, o_eot, o_eof : std_logic;
   signal o_color : pixel_t;
+  signal cyc : natural := 0;
 begin
   clk <= not clk after CLK_PERIOD / 2 when not done;
 
@@ -45,6 +47,33 @@ begin
       out_kill_o => o_kill, out_eot_o => o_eot, out_eof_o => o_eof,
       out_color_o => o_color
     );
+
+  process (clk)
+  begin
+    if rising_edge(clk) then
+      cyc <= cyc + 1;
+    end if;
+  end process;
+  out_ready <= '0' when (cyc mod 7) < 3 else '1';
+
+  stable_check : process (clk)
+    type out_t is record
+      px : fb_x_t; py : fb_y_t; z : unsigned(7 downto 0);
+      kill, eot, eof : std_logic; color : pixel_t;
+    end record;
+    variable prev, cur : out_t;
+    variable held : boolean := false;
+  begin
+    if rising_edge(clk) then
+      cur := (o_px, o_py, o_z, o_kill, o_eot, o_eof, o_color);
+      if held then
+        assert cur = prev
+          report "depth_interp_tb: output changed while stalled" severity failure;
+      end if;
+      held := out_valid = '1' and out_ready = '0' and rst_n = '1';
+      prev := cur;
+    end if;
+  end process;
 
   watchdog : process
   begin
@@ -71,6 +100,9 @@ begin
     variable ecov : std_logic;
     variable zexp : unsigned(7 downto 0);
     variable s    : scan_t;
+    variable first_s : scan_t;
+    variable first_z : unsigned(7 downto 0);
+    variable have_first : boolean := false;
 
     procedure fail(msg : string) is
     begin
@@ -91,7 +123,6 @@ begin
     wait for 5 * CLK_PERIOD;
     wait until rising_edge(clk);
     rst_n <= '1';
-    out_ready <= '1';
 
     file_open(fs, "setup.csv", read_mode);
     for k in 1 to 8 loop
@@ -114,12 +145,19 @@ begin
         s := SCAN_ZERO;
         s.px := epx; s.py := epy; s.e := ee;
         s.z := t.z; s.area2 := t.area2; s.color := t.color;
+        if not have_first then
+          first_s := s;
+        end if;
         send(s);
-        wait until rising_edge(clk) and out_valid = '1';
+        wait until rising_edge(clk) and out_valid = '1' and out_ready = '1';
 
         next_data_line(fz, lz, ok_z);
         read_interp_row(lz, n_z, zpx, zpy, zexp);
         rows := rows + 1;
+        if not have_first then
+          first_z := zexp;
+          have_first := true;
+        end if;
         if not ok_z or o_px /= zpx or o_py /= zpy or n_z /= n_e then
           fail("tri " & integer'image(n_e) & ": pixel mismatch with interp.csv");
         end if;
@@ -136,6 +174,28 @@ begin
     end loop;
     file_close(fe);
     file_close(fz);
+
+    -- reset in the middle of a division, then the same fragment again
+    send(first_s);
+    for k in 1 to 6 loop
+      wait until rising_edge(clk);
+    end loop;
+    if in_ready /= '0' then
+      fail("reset test: fragment finished before the reset");
+    end if;
+    rst_n <= '0';
+    wait until rising_edge(clk);
+    wait until rising_edge(clk);
+    rst_n <= '1';
+    wait until rising_edge(clk);
+    if out_valid /= '0' or in_ready /= '1' then
+      fail("reset test: DUT not idle after reset");
+    end if;
+    send(first_s);
+    wait until rising_edge(clk) and out_valid = '1' and out_ready = '1';
+    if o_z /= first_z then
+      fail("reset test: z wrong after reset");
+    end if;
 
     -- killed without eot/eof: accepted, nothing comes out
     s := SCAN_ZERO;
@@ -156,7 +216,7 @@ begin
     s.kill := '1'; s.eot := '1'; s.eof := '1'; s.color := x"5A";
     s.px := to_unsigned(7, FB_X_W); s.py := to_unsigned(9, FB_Y_W);
     send(s);
-    wait until rising_edge(clk) and out_valid = '1';
+    wait until rising_edge(clk) and out_valid = '1' and out_ready = '1';
     if o_kill /= '1' or o_eot /= '1' or o_eof /= '1' or o_color /= x"5A" or
        o_px /= 7 or o_py /= 9 then
       fail("marker: wrong output");
