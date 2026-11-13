@@ -15,13 +15,16 @@ FB_SRCS   = rtl/qogpu_pkg.vhd rtl/framebuffer.vhd
 BRAM_SRCS = rtl/qogpu_pkg.vhd rtl/mem_if_pkg.vhd rtl/mem_ctrl_bram.vhd
 VGA_SRCS  = rtl/qogpu_pkg.vhd rtl/vga_timing.vhd rtl/vga_scanout.vhd
 SETUP_SRCS = rtl/qogpu_pkg.vhd rtl/qogpu_fx_pkg.vhd rtl/raster_pkg.vhd rtl/tri_setup.vhd
+RASTER_SRCS = rtl/qogpu_pkg.vhd rtl/qogpu_fx_pkg.vhd rtl/raster_pkg.vhd rtl/raster_scan.vhd \
+              rtl/depth_interp.vhd rtl/rasterizer.vhd
 
 # every testbench; add each new sim-* target here
 SIM_TARGETS = sim-framebuffer sim-clear-engine sim-counter sim-bram sim-bram-w16 \
               sim-vga-timing sim-vga-timing-100 sim-vga-scanout sim-vga-scanout-100 \
-              sim-fx-mul sim-fx-mul-trunc sim-fx-pkg sim-frame-dump sim-tri-setup
+              sim-fx-mul sim-fx-mul-trunc sim-fx-pkg sim-frame-dump sim-tri-setup \
+              sim-raster-scan sim-depth-interp
 
-.PHONY: sim $(SIM_TARGETS) synth-framebuffer synth-bram synth-fx-mul synth-tri-setup \
+.PHONY: sim $(SIM_TARGETS) synth-framebuffer synth-bram synth-fx-mul synth-tri-setup synth-rasterizer \
         vectors tools build clean
 
 sim: $(SIM_TARGETS)
@@ -74,6 +77,14 @@ sim-frame-dump:
 sim-tri-setup:
 	$(SIM) tri_setup_tb $(SETUP_SRCS) tb/tri_setup_tb.vhd
 
+# E1+E2 against edge.csv (run make vectors first)
+sim-raster-scan:
+	$(SIM) raster_scan_tb $(RASTER_SRCS) tb/raster_tb_pkg.vhd tb/raster_scan_tb.vhd
+
+# E3 against edge.csv and interp.csv (run make vectors first)
+sim-depth-interp:
+	$(SIM) depth_interp_tb $(RASTER_SRCS) tb/raster_tb_pkg.vhd tb/depth_interp_tb.vhd
+
 # Nexys A7-100T, the delivery board (replan v5)
 synth-framebuffer:
 	$(SYNTH) framebuffer $(PART) clk_i 10.0 $(FB_SRCS)
@@ -88,6 +99,10 @@ synth-fx-mul:
 # check utilization.rpt for DSP48E1 = 4 (two 25x26 products)
 synth-tri-setup:
 	$(SYNTH) tri_setup $(PART) clk_i 10.0 $(SETUP_SRCS)
+
+# check utilization.rpt for the DSP48E1 count and the WNS line
+synth-rasterizer:
+	$(SYNTH) rasterizer $(PART) clk_i 10.0 $(RASTER_SRCS)
 
 # Golden vectors from the Ada reference (numeric contract, RQ-38).
 # Writes mul, viewport, setup and depth_test (committed) and edge and
