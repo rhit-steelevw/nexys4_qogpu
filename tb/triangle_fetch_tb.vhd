@@ -20,6 +20,9 @@ architecture sim of triangle_fetch_tb is
   );
   type xyz_t is array (0 to 2) of integer;
   type vertices_t is array (1 to 24) of xyz_t;
+  -- Nearest signed 16.16 encoding of 1/sqrt(3), independently specified.
+  constant NORMALIZED_COMPONENT : integer := 37837;
+  -- Original vertex signs; the expected ROM magnitudes are normalized.
   constant VERTICES : vertices_t := (
     (-1,1,1), (1,1,1), (1,-1,1), (-1,-1,1),
     (-1,1,-1), (-1,1,1), (-1,-1,1), (-1,-1,-1),
@@ -97,7 +100,7 @@ begin
                    ", slot " & integer'image(slot) severity failure;
           for axis in 0 to 2 loop
             assert xyz(slot,axis) =
-                   to_signed(VERTICES(FACES(face)(slot))(axis) * 65536, 32)
+                   to_signed(VERTICES(FACES(face)(slot))(axis) * NORMALIZED_COMPONENT, 32)
               report "Wrong coordinate, face " & integer'image(face+1) &
                      ", slot " & integer'image(slot) &
                      ", axis " & integer'image(axis) severity failure;

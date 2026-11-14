@@ -2,11 +2,13 @@
 """Generate the cube BRAM image specified by docs/spec/memory_map.md.
 
 One 32-bit binary word per line; line 1 is address 0. XYZ uses signed
-16.16 fixed point. IDs remain 1-based. Textures are black (no texels were
+16.16 fixed point after mesh-wide normalization about the origin.
+IDs remain 1-based. Textures are black (no texels were
 provided), and reserved storage is zero. No third-party packages required.
 """
 
 import argparse
+import math
 from pathlib import Path
 
 TEXTURE_SZ = 16
@@ -60,11 +62,29 @@ def fixed_16_16(value):
     return scaled & 0xFFFFFFFF
 
 
+def normalize_mesh(vertices):
+    """Divide XYZ by the largest vertex radius; preserve all other fields.
+
+    Matches Normalize_Mesh: no centering, and an all-zero mesh is unchanged.
+    Normalization occurs in floating point before fixed-point quantization;
+    nearest rounding can place the encoded radius slightly above one.
+    """
+    radius = math.sqrt(max(
+        (x*x + y*y + z*z for x, y, z, *_ in vertices), default=0.0
+    ))
+    if radius == 0.0:
+        return tuple(vertices)
+    return tuple(
+        (x / radius, y / radius, z / radius, u, v, texture_id)
+        for x, y, z, u, v, texture_id in vertices
+    )
+
+
 def build_image():
     words = [0] * BRAM_WORDS
     if len(VERTICES) != 24 or len(FACES) != 12:
         raise ValueError("The memory map requires 24 vertices and 12 faces")
-    for index, (x, y, z, u, v, texture_id) in enumerate(VERTICES):
+    for index, (x, y, z, u, v, texture_id) in enumerate(normalize_mesh(VERTICES)):
         if not (0 <= u < TEXTURE_SZ and 0 <= v < TEXTURE_SZ
                 and 1 <= texture_id <= 6):
             raise ValueError(f"Invalid attributes for vertex {index + 1}")
