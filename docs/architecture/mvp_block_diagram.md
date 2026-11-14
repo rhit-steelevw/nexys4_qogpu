@@ -22,9 +22,8 @@ RQ-79 · Sprint 1 · Owner: Vance Steele
 | B fetch | face index from A | 3 vertices (x,y,z) + color | valid/ready | RQ-108 |
 | C transform (single) | 3 vertices, 16.16 normalized | 3 vertices, screen space + depth | valid/ready | RQ-91 |
 | D setup | 3 screen-space vertices | bounding box, edge coefficients, area | valid/ready | RQ-92 |
-| E1 scan | triangle setup | pixel (x,y) | valid/ready | RQ-93 |
-| E2 coverage | pixel (x,y) | pixel + inside flag + edge weights | valid/ready | RQ-93 |
-| E3 depth interp | pixel + edge weights | pixel + z | valid/ready | RQ-93 |
+| E1+E2 scan and coverage (`raster_scan`) | triangle setup | every bounding-box pixel + edge values + kill flag | valid/ready | RQ-93 |
+| E3 depth interp (`depth_interp`) | pixel + edge values | covered pixels + z, one marker per triangle | valid/ready | RQ-93 |
 | E4 depth test | pixel + z | pixel + pass/fail | valid/ready; memory req/rsp | RQ-94 |
 | E6 write-back | passing pixel + z | color write, depth write, done | valid/ready; memory req | RQ-95 |
 | Memory controller | requests from clear, E4, E6 | read data | req/rsp (valid/ready) | RQ-106, RQ-107, RQ-109 |
@@ -129,45 +128,45 @@ Fields of `tri_t`:
 | `color`, `last` | 8, 1 | Pass-through |
 | `empty` | 1 | Zero-area triangle; only sent when it is the last one, so the frame still finishes |
 
-### E1: pixel scan
+### E1+E2: scan and coverage (`raster_scan`)
+
+One entity: the incremental edge values move with the scan position, so splitting scan and coverage would only pass three 51-bit values across a handshake. `rasterizer` wraps this block and E3 behind E4's port list.
 
 | Port | Dir | Width | Description |
 |---|---|---|---|
-| `in_valid_i` / `in_ready_o` | in / out | 1 | Handshake from D |
-| `in_*` | in | — | All D outputs |
-| `out_valid_o` / `out_ready_i` | out / in | 1 | Handshake to E2 |
-| `out_px_o` | out | 9 | Pixel x |
-| `out_py_o` | out | 8 | Pixel y |
-| `out_eot_o` | out | 1 | Last pixel of this triangle |
-| `out_eof_o` | out | 1 | Last pixel of the frame |
-| `out_tri_o` | out | — | Held copy of D's outputs for E2, E3, E6 |
-
-### E2: coverage
-
-| Port | Dir | Width | Description |
-|---|---|---|---|
-| `in_valid_i` / `in_ready_o` | in / out | 1 | Handshake from E1 |
-| `in_px_i`, `in_py_i` | in | 9, 8 | Pixel |
-| `in_eot_i`, `in_eof_i` | in | 1, 1 | Markers |
-| `in_tri_i` | in | — | Edge coefficients |
+| `in_valid_i` / `in_ready_o` | in / out | 1 | Handshake from D; ready only when idle |
+| `in_tri_i` | in | `tri_t` | D's output, latched on the transfer |
 | `out_valid_o` / `out_ready_i` | out / in | 1 | Handshake to E3 |
-| `out_px_o`, `out_py_o` | out | 9, 8 | Pixel |
-| `out_w{0,1,2}_o` | out | 51 each | Edge function values E_i, signed 18.32 raw |
-| `out_kill_o` | out | 1 | Pixel outside triangle |
-| `out_eot_o`, `out_eof_o` | out | 1, 1 | Markers |
+| `out_scan_o` | out | `scan_t` | One bounding-box pixel, see below |
 
-### E3: depth interpolation
+Fields of `scan_t` (`rtl/raster_pkg.vhd`):
+
+| Field | Width | Description |
+|---|---|---|
+| `px`, `py` | 9, 8 | Pixel, row-major over the bounding box |
+| `e(0..2)` | 51 each | E_i at the pixel center, signed 18.32 raw |
+| `kill` | 1 | Not covered, or the marker of an empty triangle |
+| `eot`, `eof` | 1, 1 | Last pixel of the triangle (xmax, ymax); the same on the frame's last triangle |
+| `z(0..2)`, `area2` | `DEPTH_MAX_W` each, 51 | Carried for E3, so nothing downstream reads a held `tri_t` |
+| `color` | 8 | Carried for E6 |
+
+An `empty` triangle gives one pixel at (xmin, ymin) with `kill`, `eot` and `eof` set.
+
+### E3: depth interpolation (`depth_interp`)
 
 | Port | Dir | Width | Description |
 |---|---|---|---|
-| `in_valid_i` / `in_ready_o` | in / out | 1 | Handshake from E2 |
-| `in_px_i`, `in_py_i`, `in_w{0,1,2}_i` | in | — | From E2 |
-| `in_kill_i`, `in_eot_i`, `in_eof_i` | in | 1 each | From E2 |
-| `in_tri_i` | in | — | z0..z2, area |
+| `in_valid_i` / `in_ready_o` | in / out | 1 | Handshake from E1+E2 |
+| `in_scan_i` | in | `scan_t` | |
 | `out_valid_o` / `out_ready_i` | out / in | 1 | Handshake to E4 |
 | `out_px_o`, `out_py_o` | out | 9, 8 | Pixel |
-| `out_z_o` | out | `DEPTH_W` | Interpolated depth |
+| `out_z_o` | out | `DEPTH_W` | Interpolated depth (rule 10) |
 | `out_kill_o`, `out_eot_o`, `out_eof_o` | out | 1 each | Pass-through |
+| `out_color_o` | out | 8 | Face color, for E6 |
+
+Generic `INTERP`: `false` passes z_0 and is exact only when z_0 = z_1 = z_2.
+
+Killed pixels without `eot` or `eof` are dropped here. E4 sees every covered pixel, plus one killed marker per triangle (the last one also has `eof`).
 
 ### E4: depth test
 
@@ -183,6 +182,8 @@ Fields of `tri_t`:
 | `out_eot_o`, `out_eof_o` | out | 1 each | Markers |
 
 Skips the read when `in_kill_i` is set
+
+**Status:** `rtl/depth_test.vhd` does not have the kill, eot, eof or color ports yet. It takes `px`, `py`, `pz`, `pu`, `pv` and outputs `pass_x/y/z/u/v`, and `writeback` takes `pass_color`. Until E4 and E6 carry the markers and color, the top level has to drop markers before E4 (a killed fragment is consumed, not forwarded), carry color around E4, and make `frame_done` itself from the `eof` marker.
 
 ### E6: write-back
 

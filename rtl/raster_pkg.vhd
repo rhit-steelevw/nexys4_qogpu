@@ -59,4 +59,34 @@ package raster_pkg is
     last => '0',
     empty => '0'
   );
+
+  -- E_i values, exact 18.32 in 51 bits (rule 9)
+  type e_arr3_t is array (0 to 2) of area_t;
+
+  -- One bounding-box pixel from E1/E2 (raster_scan) to E3 (depth_interp).
+  -- Carries the triangle's z, area2 and color, because E1 may accept the
+  -- next triangle while this pixel is still downstream.
+  type scan_t is record
+    px    : fb_x_t;
+    py    : fb_y_t;
+    e     : e_arr3_t;       -- E_0..E_2 at the pixel center (rule 2)
+    kill  : std_logic;      -- not covered (rule 11), or the marker of an empty triangle
+    eot   : std_logic;      -- last pixel of this triangle: (xmax, ymax)
+    eof   : std_logic;      -- eot of the frame's last triangle
+    z     : depth_arr3_t;   -- vertex depths for rule 10
+    area2 : area_t;
+    color : pixel_t;
+  end record;
+
+  constant SCAN_ZERO : scan_t := (
+    px => (others => '0'),
+    py => (others => '0'),
+    e  => (others => (others => '0')),
+    kill => '0',
+    eot => '0',
+    eof => '0',
+    z  => (others => (others => '0')),
+    area2 => (others => '0'),
+    color => (others => '0')
+  );
 end package;

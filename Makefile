@@ -9,19 +9,25 @@ VIVADO ?= vivado
 VBATCH = $(VIVADO) -mode batch -nojournal -nolog -notrace
 SIM    = $(VBATCH) -source scripts/sim.tcl -tclargs
 SYNTH  = $(VBATCH) -source scripts/synth_ooc.tcl -tclargs
+WAVE   = $(VBATCH) -source scripts/wave.tcl -tclargs
 PART   = xc7a100tcsg324-1
 
 FB_SRCS   = rtl/qogpu_pkg.vhd rtl/framebuffer.vhd
 BRAM_SRCS = rtl/qogpu_pkg.vhd rtl/mem_if_pkg.vhd rtl/mem_ctrl_bram.vhd
 VGA_SRCS  = rtl/qogpu_pkg.vhd rtl/vga_timing.vhd rtl/vga_scanout.vhd
 SETUP_SRCS = rtl/qogpu_pkg.vhd rtl/qogpu_fx_pkg.vhd rtl/raster_pkg.vhd rtl/tri_setup.vhd
+RASTER_SRCS = rtl/qogpu_pkg.vhd rtl/qogpu_fx_pkg.vhd rtl/raster_pkg.vhd rtl/raster_scan.vhd \
+              rtl/depth_interp.vhd rtl/rasterizer.vhd
 
 # every testbench; add each new sim-* target here
+WAVE_TARGETS = wave-tri-setup wave-raster-scan wave-depth-interp wave-depth-interp-bypass wave-rasterizer
+
 SIM_TARGETS = sim-framebuffer sim-clear-engine sim-counter sim-bram sim-bram-w16 \
               sim-vga-timing sim-vga-timing-100 sim-vga-scanout sim-vga-scanout-100 \
-              sim-fx-mul sim-fx-mul-trunc sim-fx-pkg sim-frame-dump sim-tri-setup
+              sim-fx-mul sim-fx-mul-trunc sim-fx-pkg sim-frame-dump sim-tri-setup \
+              sim-raster-scan sim-depth-interp sim-depth-interp-bypass sim-rasterizer
 
-.PHONY: sim $(SIM_TARGETS) synth-framebuffer synth-bram synth-fx-mul synth-tri-setup \
+.PHONY: sim $(SIM_TARGETS) $(WAVE_TARGETS) synth-framebuffer synth-bram synth-fx-mul synth-tri-setup synth-rasterizer \
         vectors tools build clean
 
 sim: $(SIM_TARGETS)
@@ -74,6 +80,45 @@ sim-frame-dump:
 sim-tri-setup:
 	$(SIM) tri_setup_tb $(SETUP_SRCS) tb/tri_setup_tb.vhd
 
+# edge.csv and interp.csv are generated, not committed
+tb/vectors/edge.csv tb/vectors/interp.csv:
+	@echo "missing $@: run 'make vectors' (needs GNAT + gprbuild, see alr toolchain)"; exit 1
+
+sim-raster-scan sim-depth-interp sim-rasterizer: tb/vectors/edge.csv tb/vectors/interp.csv
+
+# E1+E2 against edge.csv (run make vectors first)
+sim-raster-scan:
+	$(SIM) raster_scan_tb $(RASTER_SRCS) tb/raster_tb_pkg.vhd tb/raster_scan_tb.vhd
+
+# E3 against edge.csv and interp.csv (run make vectors first)
+sim-depth-interp:
+	$(SIM) depth_interp_tb $(RASTER_SRCS) tb/raster_tb_pkg.vhd tb/depth_interp_tb.vhd
+
+# E3 with INTERP = false: z_0 passes through
+sim-depth-interp-bypass:
+	$(SIM) depth_interp_bypass_tb $(RASTER_SRCS) tb/depth_interp_bypass_tb.vhd
+
+# tri_setup -> rasterizer: shared edge covered once, frame dumped to rasterizer.hex
+sim-rasterizer:
+	$(SIM) rasterizer_tb $(RASTER_SRCS) rtl/tri_setup.vhd rtl/framebuffer.vhd tb/frame_dump_pkg.vhd tb/raster_tb_pkg.vhd tb/rasterizer_tb.vhd
+
+# make wave-<tb>: compile, elaborate with -debug typical and open the xsim GUI
+# (build/wave/<tb>/). Run a short window there, e.g. "run 20 us"
+wave-tri-setup:
+	$(WAVE) tri_setup_tb $(SETUP_SRCS) tb/tri_setup_tb.vhd
+
+wave-raster-scan: tb/vectors/edge.csv
+	$(WAVE) raster_scan_tb $(RASTER_SRCS) tb/raster_tb_pkg.vhd tb/raster_scan_tb.vhd
+
+wave-depth-interp: tb/vectors/edge.csv tb/vectors/interp.csv
+	$(WAVE) depth_interp_tb $(RASTER_SRCS) tb/raster_tb_pkg.vhd tb/depth_interp_tb.vhd
+
+wave-depth-interp-bypass:
+	$(WAVE) depth_interp_bypass_tb $(RASTER_SRCS) tb/depth_interp_bypass_tb.vhd
+
+wave-rasterizer: tb/vectors/edge.csv tb/vectors/interp.csv
+	$(WAVE) rasterizer_tb $(RASTER_SRCS) rtl/tri_setup.vhd rtl/framebuffer.vhd tb/frame_dump_pkg.vhd tb/raster_tb_pkg.vhd tb/rasterizer_tb.vhd
+
 # Nexys A7-100T, the delivery board (replan v5)
 synth-framebuffer:
 	$(SYNTH) framebuffer $(PART) clk_i 10.0 $(FB_SRCS)
@@ -88,6 +133,10 @@ synth-fx-mul:
 # check utilization.rpt for DSP48E1 = 4 (two 25x26 products)
 synth-tri-setup:
 	$(SYNTH) tri_setup $(PART) clk_i 10.0 $(SETUP_SRCS)
+
+# check utilization.rpt for the DSP48E1 count and the WNS line
+synth-rasterizer:
+	$(SYNTH) rasterizer $(PART) clk_i 10.0 $(RASTER_SRCS)
 
 # Golden vectors from the Ada reference (numeric contract, RQ-38).
 # Writes mul, viewport, setup and depth_test (committed) and edge and
