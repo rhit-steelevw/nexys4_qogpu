@@ -19,16 +19,28 @@ SETUP_SRCS = rtl/qogpu_pkg.vhd rtl/qogpu_fx_pkg.vhd rtl/raster_pkg.vhd rtl/tri_s
 RASTER_SRCS = rtl/qogpu_pkg.vhd rtl/qogpu_fx_pkg.vhd rtl/raster_pkg.vhd rtl/raster_scan.vhd \
               rtl/depth_interp.vhd rtl/rasterizer.vhd
 
+MEMIF_SRCS = rtl/qogpu_pkg.vhd rtl/mem_if_pkg.vhd
+PIPE_SRCS  = rtl/qogpu_pkg.vhd rtl/qogpu_fx_pkg.vhd rtl/raster_pkg.vhd rtl/mem_if_pkg.vhd \
+             rtl/tri_setup.vhd rtl/raster_scan.vhd rtl/depth_interp.vhd rtl/rasterizer.vhd \
+             rtl/depth_test.vhd rtl/writeback.vhd rtl/draw_pipeline.vhd rtl/scene_stub.vhd
+TOP_SRCS   = $(PIPE_SRCS) rtl/framebuffer.vhd rtl/clear_engine.vhd rtl/mem_mux.vhd \
+             rtl/mem_ctrl_bram.vhd rtl/vga_timing.vhd rtl/vga_scanout.vhd rtl/block_a.vhd \
+             rtl/gpu_top.vhd
+BOARD_SRCS = $(TOP_SRCS) rtl/board/nexys_a7_top.vhd
+XDC        = constraints/nexys_a7_100t.xdc
+BIT        = $(VBATCH) -source scripts/build_bit.tcl -tclargs
+
 # every testbench; add each new sim-* target here
 WAVE_TARGETS = wave-tri-setup wave-raster-scan wave-depth-interp wave-depth-interp-bypass wave-rasterizer
 
 SIM_TARGETS = sim-framebuffer sim-clear-engine sim-counter sim-bram sim-bram-w16 \
               sim-vga-timing sim-vga-timing-100 sim-vga-scanout sim-vga-scanout-100 \
               sim-fx-mul sim-fx-mul-trunc sim-fx-pkg sim-frame-dump sim-tri-setup \
-              sim-raster-scan sim-depth-interp sim-depth-interp-bypass sim-rasterizer
+              sim-raster-scan sim-depth-interp sim-depth-interp-bypass sim-rasterizer \
+              sim-depth-test sim-writeback sim-draw-pipeline sim-draw-pipeline-blue-first sim-gpu-top
 
 .PHONY: sim $(SIM_TARGETS) $(WAVE_TARGETS) synth-framebuffer synth-bram synth-fx-mul synth-tri-setup synth-rasterizer \
-        vectors tools build clean
+        vectors tools build clean bit program
 
 sim: $(SIM_TARGETS)
 
@@ -36,7 +48,29 @@ sim-framebuffer:
 	$(SIM) framebuffer_tb $(FB_SRCS) tb/framebuffer_tb.vhd
 
 sim-clear-engine:
-	$(SIM) clear_engine_tb $(FB_SRCS) rtl/clear_engine.vhd tb/clear_engine_tb.vhd
+	$(SIM) clear_engine_tb $(FB_SRCS) rtl/mem_if_pkg.vhd rtl/clear_engine.vhd tb/clear_engine_tb.vhd
+
+sim-depth-test:
+	$(SIM) depth_test_tb rtl/depth_test.vhd tb/depth_test_tb.vhd
+
+sim-writeback:
+	$(SIM) tb_writeback rtl/writeback.vhd tb/tb_writeback.vhd
+
+sim-draw-pipeline:
+	$(SIM) draw_pipeline_tb $(TOP_SRCS) tb/frame_dump_pkg.vhd tb/draw_pipeline_tb.vhd
+
+sim-draw-pipeline-blue-first:
+	$(SIM) draw_pipeline_blue_first_tb $(TOP_SRCS) tb/frame_dump_pkg.vhd \
+	    tb/draw_pipeline_tb.vhd tb/draw_pipeline_blue_first_tb.vhd
+
+sim-gpu-top:
+	$(SIM) gpu_top_tb $(TOP_SRCS) tb/frame_dump_pkg.vhd tb/gpu_top_tb.vhd
+
+bit:
+	$(BIT) nexys_a7_top $(PART) $(XDC) $(BOARD_SRCS)
+
+program:
+	$(VBATCH) -source scripts/program.tcl -tclargs build/bit/nexys_a7_top.bit
 
 sim-counter:
 	$(SIM) counter_tb rtl/counter.vhd tb/counter_tb.vhd

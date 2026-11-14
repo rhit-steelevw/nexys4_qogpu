@@ -27,6 +27,10 @@ architecture sim of tb_writeback is
   signal fb_n, mem_n : natural := 0;
   signal fb_skip : natural := 0;   -- fb writes of a fragment aborted by reset
   signal force_stall : std_logic := '0';
+  signal pass_kill, pass_eot, pass_eof : std_logic := '0';
+  signal tri_done, frame_done : std_logic;
+  signal ph3 : boolean := false;
+  signal tri_cnt, frm_cnt, both_cnt, p3_fb, p3_mem : natural := 0;
 
   -- fragment i: corners first/last, scattered in between
   function fx(i : natural) return natural is
@@ -48,7 +52,19 @@ begin
     generic map (DEPTH_W => DW)
     port map (clk, rst_n, pass_valid, pass_ready, pass_x, pass_y, pass_z, pass_color,
               fb_we, fb_waddr, fb_wdata,
-              mem_req_valid, mem_req_ready, mem_req_we, mem_req_addr, mem_req_wdata);
+              mem_req_valid, mem_req_ready, mem_req_we, mem_req_addr, mem_req_wdata,
+              pass_kill, pass_eot, pass_eof, tri_done, frame_done);
+
+  counters : process (clk)
+  begin
+    if rising_edge(clk) then
+      if tri_done = '1' then tri_cnt <= tri_cnt + 1; end if;
+      if frame_done = '1' then frm_cnt <= frm_cnt + 1; end if;
+      if tri_done = '1' and frame_done = '1' then both_cnt <= both_cnt + 1; end if;
+      if ph3 and fb_we = '1' then p3_fb <= p3_fb + 1; end if;
+      if ph3 and mem_req_valid = '1' and mem_req_ready = '1' then p3_mem <= p3_mem + 1; end if;
+    end if;
+  end process;
 
   -- Memory controller stall model: first 10 requests immediate, then 1..7 cycle stalls
   process (clk)
@@ -69,7 +85,7 @@ begin
     variable fi : integer;
   begin
     if rising_edge(clk) then
-      if fb_we = '1' then
+      if fb_we = '1' and not ph3 then
         fi := fb_n - fb_skip;
         assert fi < NT report "extra framebuffer write" severity failure;
         assert to_integer(fb_waddr) = faddr(fi)
@@ -82,7 +98,7 @@ begin
         writeline(dump, l);
         fb_n <= fb_n + 1;
       end if;
-      if mem_req_valid = '1' and mem_req_ready = '1' then
+      if mem_req_valid = '1' and mem_req_ready = '1' and not ph3 then
         assert mem_n < NT report "extra depth write" severity failure;
         assert mem_req_we = '1' report "depth request not a write" severity failure;
         assert to_integer(mem_req_addr) = faddr(mem_n)
@@ -96,6 +112,30 @@ begin
 
   -- Stimulus: back-to-back, with idle gaps every 5th fragment
   process
+    variable t0, f0, b0 : natural;
+
+    procedure present (kill, eot, eof : std_logic) is
+    begin
+      pass_x <= to_unsigned(10, 9); pass_y <= to_unsigned(20, 8);
+      pass_z <= to_unsigned(30, DW);
+      pass_color <= x"5A";
+      pass_kill <= kill; pass_eot <= eot; pass_eof <= eof;
+      pass_valid <= '1';
+    end procedure;
+
+    procedure finish_present is
+    begin
+      loop
+        wait until rising_edge(clk);
+        exit when pass_ready = '1';
+      end loop;
+      pass_valid <= '0'; pass_kill <= '0'; pass_eot <= '0'; pass_eof <= '0';
+    end procedure;
+
+    procedure idle (n : natural) is
+    begin
+      for g in 1 to n loop wait until rising_edge(clk); end loop;
+    end procedure;
   begin
     wait for 52 ns;
     rst_n <= '1';
@@ -157,7 +197,68 @@ begin
     assert fb_n - fb_skip = NT and mem_n = NT
       report "final count mismatch: fb=" & integer'image(fb_n - fb_skip) & " mem=" & integer'image(mem_n)
       severity failure;
-    report "TEST PASSED: " & integer'image(NT) & " fragments + reset-while-stalled";
+
+    -- Phase 3: markers, tri_done / frame_done (H2/H3)
+    ph3 <= true;
+    idle(2);
+
+    -- killed eot: one-clock transfer, no writes, done pulse on the next cycle
+    t0 := tri_cnt;
+    present('1', '1', '0');
+    wait until rising_edge(clk);
+    assert pass_ready = '1' report "killed marker not taken in one clock" severity failure;
+    pass_valid <= '0'; pass_kill <= '0'; pass_eot <= '0';
+    wait for 1 ns;
+    assert tri_done = '1' and frame_done = '0' report "tri_done not pulsed after killed eot" severity failure;
+    idle(5);
+    assert tri_cnt = t0 + 1 report "tri_done count wrong after killed eot" severity failure;
+    assert p3_fb = 0 and p3_mem = 0 report "killed marker wrote something" severity failure;
+
+    -- passing eot with the depth write stalled: tri_done only after the accept
+    t0 := tri_cnt;
+    force_stall <= '1';
+    present('0', '1', '0');
+    finish_present;
+    for g in 1 to 10 loop
+      wait until rising_edge(clk);
+      assert tri_done = '0' report "tri_done before the depth write was accepted" severity failure;
+      assert mem_req_valid = '1' report "depth request dropped while stalled" severity failure;
+    end loop;
+    force_stall <= '0';
+    idle(15);
+    assert tri_cnt = t0 + 1 report "tri_done did not pulse exactly once" severity failure;
+    assert p3_mem = 1 and p3_fb = 1 report "passing eot write count wrong" severity failure;
+
+    -- killed eot behind a stalled write: not taken until the write is accepted
+    t0 := tri_cnt;
+    force_stall <= '1';
+    present('0', '0', '0');
+    finish_present;
+    present('1', '1', '0');
+    for g in 1 to 6 loop
+      wait until rising_edge(clk);
+      assert pass_ready = '0' report "killed eot taken while a write is pending" severity failure;
+      assert tri_done = '0' report "tri_done while a write is pending" severity failure;
+    end loop;
+    force_stall <= '0';
+    finish_present;
+    idle(15);
+    assert tri_cnt = t0 + 1 report "tri_done missing after stalled write" severity failure;
+
+    -- eot and eof together: both pulses on the same cycle
+    t0 := tri_cnt; f0 := frm_cnt; b0 := both_cnt;
+    present('0', '1', '1');
+    finish_present;
+    idle(15);
+    assert tri_cnt = t0 + 1 and frm_cnt = f0 + 1 and both_cnt = b0 + 1
+      report "eot+eof pulses wrong (written fragment)" severity failure;
+    present('1', '1', '1');
+    finish_present;
+    idle(5);
+    assert tri_cnt = t0 + 2 and frm_cnt = f0 + 2 and both_cnt = b0 + 2
+      report "eot+eof pulses wrong (killed fragment)" severity failure;
+
+    report "tb_writeback: ALL TESTS PASSED (" & integer'image(NT) & " fragments + reset-while-stalled)";
     finish;
   end process;
 end architecture;

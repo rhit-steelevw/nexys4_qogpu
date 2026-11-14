@@ -46,6 +46,7 @@ architecture sim of rasterizer_tb is
   signal tri : tri_t;
 
   signal out_valid, out_ready : std_logic := '0';
+  signal tri_done : std_logic := '0';   -- H1/H2: pulsed by the consumer on each eot
   signal o_px   : fb_x_t;
   signal o_py   : fb_y_t;
   signal o_z    : unsigned(7 downto 0);
@@ -95,7 +96,8 @@ begin
       out_valid_o => out_valid, out_ready_i => out_ready,
       out_px_o => o_px, out_py_o => o_py, out_z_o => o_z,
       out_kill_o => o_kill, out_eot_o => o_eot, out_eof_o => o_eof,
-      out_color_o => o_color
+      out_color_o => o_color,
+      tri_done_i => tri_done   -- H1: from the E4/E6 stand-in below
     );
 
   wr_en1 <= wr_en when phase = 1 else '0';
@@ -120,7 +122,8 @@ begin
     variable a     : natural;
   begin
     if rising_edge(clk) then
-      wr_en <= '0';
+      wr_en    <= '0';
+      tri_done <= '0';
       if out_valid = '1' and out_ready = '1' then
         if o_kill = '0' then
           a := to_integer(o_py) * FB_W + to_integer(o_px);
@@ -135,6 +138,7 @@ begin
         end if;
         if o_eot = '1' then
           n_eot := n_eot + 1;
+          tri_done <= '1';             -- this model writes in the same cycle (H2)
         end if;
         if o_eof = '1' then
           max_h := 0;

@@ -27,6 +27,10 @@ architecture sim of depth_test_tb is
   signal py : unsigned(7 downto 0) := (others => '0');
   signal pz : unsigned(DEPTH_W-1 downto 0) := (others => '0');
   signal pu, pv : unsigned(7 downto 0) := (others => '0');
+  signal frag_kill, frag_eot, frag_eof : std_logic := '0';
+  signal frag_color : std_logic_vector(7 downto 0) := (others => '0');
+  signal pass_kill, pass_eot, pass_eof : std_logic;
+  signal pass_color : std_logic_vector(7 downto 0);
 
   signal mem_req_valid, mem_req_ready : std_logic;
   signal mem_req_addr : unsigned(16 downto 0);
@@ -56,6 +60,8 @@ architecture sim of depth_test_tb is
   signal last_y : unsigned(7 downto 0);
   signal last_z : unsigned(DEPTH_W-1 downto 0);
   signal last_u, last_v : unsigned(7 downto 0);
+  signal last_kill, last_eot, last_eof : std_logic;
+  signal last_color : std_logic_vector(7 downto 0);
 begin
   clk_gen : process
   begin
@@ -72,12 +78,15 @@ begin
       clk => clk, rst_n => rst_n,
       frag_valid => frag_valid, frag_ready => frag_ready,
       px => px, py => py, pz => pz, pu => pu, pv => pv,
+      frag_kill => frag_kill, frag_eot => frag_eot, frag_eof => frag_eof,
+      frag_color => frag_color,
       mem_req_valid => mem_req_valid, mem_req_ready => mem_req_ready,
       mem_req_addr => mem_req_addr,
       mem_rsp_valid => mem_rsp_valid, mem_rsp_data => mem_rsp_data,
       pass_valid => pass_valid, pass_ready => pass_ready,
       pass_x => pass_x, pass_y => pass_y, pass_z => pass_z, pass_u => pass_u, pass_v => pass_v,
-      wr_pending => '0');
+      pass_kill => pass_kill, pass_eot => pass_eot, pass_eof => pass_eof,
+      pass_color => pass_color);
 
   ---------------------------------------------------------------------------
   -- Memory-controller model: one outstanding read, configurable latency.
@@ -180,8 +189,12 @@ begin
   begin
     if rising_edge(clk) then
       if pass_valid = '1' and pass_ready = '1' then
-        mem(to_integer(pass_y) * 320 + to_integer(pass_x)) <= pass_z;
+        if pass_kill = '0' then
+          mem(to_integer(pass_y) * 320 + to_integer(pass_x)) <= pass_z;
+        end if;
         pass_count <= pass_count + 1;
+        last_kill <= pass_kill; last_eot <= pass_eot; last_eof <= pass_eof;
+        last_color <= pass_color;
         last_x <= pass_x; last_y <= pass_y; last_z <= pass_z; last_u <= pass_u; last_v <= pass_v;
       end if;
     end if;
@@ -259,6 +272,35 @@ begin
           report "fragment (" & integer'image(x) & "," & integer'image(y) & ") z="
                  & integer'image(z) & " should have been DROPPED" severity failure;
       end if;
+    end procedure;
+
+    -- fragment with side-band flags; exp_fwd: reaches E6, exp_kill: with pass_kill set,
+    -- exp_read: E4 issues a depth read
+    procedure send_ex (x, y, z : natural; kill, eot, eof : std_logic; c : natural;
+                       exp_fwd, exp_kill, exp_read : boolean; name : string) is
+      variable before, reads : natural;
+    begin
+      before := pass_count;
+      reads  := req_count;
+      frag_kill <= kill; frag_eot <= eot; frag_eof <= eof;
+      frag_color <= std_logic_vector(to_unsigned(c, 8));
+      frag_valid <= '1';
+      px <= to_unsigned(x, 9); py <= to_unsigned(y, 8);
+      pz <= to_unsigned(z, DEPTH_W); pu <= (others => '0'); pv <= (others => '0');
+      wait until rising_edge(clk) and frag_ready = '1';
+      frag_valid <= '0';
+      frag_kill <= '0'; frag_eot <= '0'; frag_eof <= '0';
+      wait until rising_edge(clk) and frag_ready = '1';
+      if exp_fwd then
+        assert pass_count = before + 1 report name & ": should be forwarded" severity failure;
+        assert (last_kill = '1') = exp_kill report name & ": pass_kill wrong" severity failure;
+        assert last_eot = eot and last_eof = eof report name & ": markers not carried" severity failure;
+        assert last_color = std_logic_vector(to_unsigned(c, 8)) report name & ": pass_color wrong" severity failure;
+      else
+        assert pass_count = before report name & ": should be dropped" severity failure;
+      end if;
+      assert (req_count /= reads) = exp_read
+        report name & ": memory read expectation failed" severity failure;
     end procedure;
 
     -- off-screen fragment: must be dropped and must not cause a memory read
@@ -357,6 +399,16 @@ begin
         check_depth(base + 8, 13, 70);
       end if;
 
+      -- H: markers and color
+      send_ex(base+1, 20, 40, '0', '0', '0', 16#5A#, true, false, true, "pass keeps color");
+      send_ex(base+1, 20, 40, '1', '1', '0', 16#A5#, true, true, false, "killed eot marker");
+      send_ex(base+1, 20, 90, '0', '0', '1', 16#3C#, true, true, true, "failed eof marker");
+      send_ex(base+1, 20, 90, '0', '0', '0', 16#3C#, false, false, true, "failed no marker");
+      send_ex(base+1, 20, 10, '1', '0', '0', 16#3C#, false, false, false, "kill no marker");
+      send_ex(base+1, 20, 10, '1', '1', '1', 16#3C#, true, true, false, "killed eot+eof");
+      send_ex(320, 5, 10, '0', '1', '0', 16#3C#, true, true, false, "off-screen marker");
+      check_depth(base+1, 20, 40);
+
       -- G: random traffic on 4 pixels, scoreboard = depth memory
       for i in 1 to 150 loop
         uniform(s1, s2, r); rx := base + 6 + integer(floor(r * 4.0));
@@ -372,7 +424,7 @@ begin
       report "random latency did not cover 10..40 (min=" & integer'image(lat_min)
              & " max=" & integer'image(lat_max) & ")" severity failure;
     report "latency range drawn: " & integer'image(lat_min) & ".." & integer'image(lat_max);
-    report "ALL TESTS PASSED (6 configs)" severity note;
+    report "depth_test_tb: ALL TESTS PASSED" severity note;
     done <= true;
     wait;
   end process;

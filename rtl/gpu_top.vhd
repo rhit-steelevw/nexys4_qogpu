@@ -1,92 +1,85 @@
--- gpu_top.vhd
--- Last modified: 11/14/2026
--- top level with clear engine, framebuffer, VGA and BRAM back-end
-
+-- gpu_top.vhd : Integration 2 top level (RQ-99), SKELETON
+--
+-- Block A (command_controller) -> scene_stub -> draw_pipeline (D..E6)
+-- clear_engine + draw_pipeline share the framebuffer write port and, through
+-- mem_mux, the depth-buffer memory controller (BRAM back-end).
+-- VGA scan-out reads the framebuffer. One clock (100 MHz), pixel enable 1 in 4.
+--
+-- Port list is FROZEN (plan, Workstream 4): the board wrapper is built against it,
+-- and the Integration 1 bring-up gpu_top exposes the same ports with tie-offs.
+-- Merge order: close RQ-96 (gpu_top_tb on the bring-up version) BEFORE replacing it.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use work.qogpu_pkg.all;
+use work.qogpu_fx_pkg.all;
 use work.mem_if_pkg.all;
-use work.bringup_pkg.all;
 
 entity gpu_top is
+  generic (
+    DEPTH_W : positive range 1 to 16 := 8;   -- later from RQ-113's board config package
+    INTERP  : boolean := true;
+    PIX_DIV : positive := 4                  -- 100 MHz -> 25 MHz pixel enable
+  );
   port (
     clk, rst_n         : in  std_logic;
+    start_i            : in  std_logic;      -- one-cycle pulse: clear + draw one frame
     vga_r, vga_g       : out std_logic_vector(2 downto 0);
     vga_b              : out std_logic_vector(1 downto 0);
-    vga_hs_n, vga_vs_n : out std_logic
+    vga_hs_n, vga_vs_n : out std_logic;
+    busy_o             : out std_logic;      -- Block A busy
+    frame_done_o       : out std_logic;      -- sticky: last frame finished, cleared by start_i
+    error_o            : out std_logic       -- Block A sticky error
   );
 end entity gpu_top;
 
 architecture rtl of gpu_top is
-
-  constant DEPTH_W  : positive := BRINGUP_DEPTH_W;
-  constant PIX_DIV  : positive := 4;   -- 100 MHz clock -> 25 MHz pixel enable
-
-  -- reset (button -> two flops, then used synchronously everywhere)
   signal rst_meta, rst_s : std_logic := '0';
-
-  -- pixel enable
   signal pix_cnt : natural range 0 to PIX_DIV - 1 := 0;
   signal pix_en  : std_logic;
 
+  -- Block A
+  signal a_clr_start, a_clr_done : std_logic;
+  signal a_clr_color : pixel_t;
+  signal a_clr_depth : std_logic_vector(DEPTH_W - 1 downto 0);
+  signal a_fs_valid, a_fs_ready : std_logic;
+  signal a_done, a_busy, a_err  : std_logic;
+
+  -- scene_stub -> draw_pipeline
+  signal s_valid, s_ready : std_logic;
+  signal s_v0x, s_v0y, s_v1x, s_v1y, s_v2x, s_v2y : q16_t;
+  signal s_z0, s_z1, s_z2 : unsigned(DEPTH_W - 1 downto 0);
+  signal s_color : pixel_t;
+  signal s_last  : std_logic;
+
+  -- draw_pipeline
+  signal dp_fb_we : std_logic;
+  signal dp_fb_addr : fb_addr_t;
+  signal dp_fb_data : pixel_t;
+  signal dp_frame_done : std_logic;
+
   -- clear engine
-  signal ce_start, ce_busy, ce_done : std_logic := '0';
-  signal ce_depth     : std_logic_vector(DEPTH_W - 1 downto 0);
-  signal ce_fb_we     : std_logic;
-  signal ce_fb_addr   : fb_addr_t;
-  signal ce_fb_data   : pixel_t;
-  signal ce_req       : mem_req_t;
-  signal ce_req_v     : std_logic;
-  signal ce_req_we    : std_logic;
+  signal ce_fb_we : std_logic;
+  signal ce_fb_addr : fb_addr_t;
+  signal ce_fb_data : pixel_t;
+  signal ce_req_v, ce_req_we : std_logic;
   signal ce_req_addr  : fb_addr_t;
   signal ce_req_wdata : std_logic_vector(DEPTH_W - 1 downto 0);
 
-  -- E6 write-back 
-  signal e6_valid, e6_ready : std_logic := '0';
-  signal e6_x     : unsigned(8 downto 0) := (others => '0');
-  signal e6_y     : unsigned(7 downto 0) := (others => '0');
-  signal e6_z     : unsigned(DEPTH_W - 1 downto 0) := (others => '0');
-  signal e6_color : pixel_t := (others => '0');
-  signal e6_fb_we     : std_logic;
-  signal e6_fb_addr   : fb_addr_t;
-  signal e6_fb_data   : pixel_t;
-  signal e6_req       : mem_req_t;
-  signal e6_req_v     : std_logic;
-  signal e6_req_we    : std_logic;
-  signal e6_req_addr  : fb_addr_t;
-  signal e6_req_wdata : std_logic_vector(DEPTH_W - 1 downto 0);
-
-  -- E4 slot 
-  signal e4_req : mem_req_t := MEM_REQ_IDLE;
+  -- memory
+  signal reqs     : mem_req_array_t(0 to MEM_CLIENTS - 1);
+  signal readys   : std_logic_vector(0 to MEM_CLIENTS - 1);
+  signal mem_req  : mem_req_t;
+  signal mem_req_ready, mem_ready : std_logic;
+  signal mem_rsp  : mem_rsp_t;
 
   -- framebuffer
-  signal fb_we    : std_logic;
-  signal fb_waddr : fb_addr_t;
-  signal fb_wdata : pixel_t;
-  signal scan_addr : fb_addr_t;
-  signal scan_data : pixel_t;
+  signal fb_we : std_logic;
+  signal fb_waddr, scan_addr : fb_addr_t;
+  signal fb_wdata, scan_data : pixel_t;
 
-  -- memory controller port, after the priority mux
-  signal reqs      : mem_req_array_t(0 to MEM_CLIENTS - 1);
-  signal grant     : natural range 0 to MEM_CLIENTS - 1;
-  signal mem_req   : mem_req_t;
-  signal mem_req_ready, mem_ready : std_logic;
-  signal mem_rsp   : mem_rsp_t;
-  signal ready_clr, ready_e6, ready_e4 : std_logic;
-
-  -- bring-up sequencer
-  type seq_t is (Q_START, Q_CLEAR_WAIT,
-                 Q_FRAG_PRESENT, Q_FRAG_ACCEPT, Q_FRAG_IDLE,
-                 Q_RD_REQ, Q_RD_ACCEPT, Q_RD_RSP, Q_DONE);
-  signal seq : seq_t := Q_START;
-  signal idx : natural range 0 to 15 := 0;
-
+  signal frame_done_r : std_logic := '0';
 begin
-
-  ---------------------------------------------------------------------------
-  -- reset sync and pixel enable
-  ---------------------------------------------------------------------------
   process (clk)
   begin
     if rising_edge(clk) then
@@ -107,92 +100,105 @@ begin
   end process;
   pix_en <= '1' when pix_cnt = PIX_DIV - 1 else '0';
 
-  ---------------------------------------------------------------------------
-  -- modules
-  ---------------------------------------------------------------------------
-  u_fb : entity work.framebuffer
+  u_a : entity work.command_controller
+    generic map (DEPTH_W => DEPTH_W)
     port map (
-      clk_i => clk, wr_en_i => fb_we, wr_addr_i => fb_waddr,
-      wr_data_i => fb_wdata, rd_addr_i => scan_addr, rd_data_o => scan_data
+      clk_i => clk, rstn_i => rst_s,
+      start_i => start_i, busy_o => a_busy, done_o => a_done,
+      err_i => '0', error_o => a_err,                       -- no Block B yet
+      rot_wr_en_i => '0', rot_wr_sel_i => (others => '0'), rot_wr_data_i => (others => '0'),
+      cos_x_o => open, sin_x_o => open, cos_y_o => open,
+      sin_y_o => open, cos_z_o => open, sin_z_o => open,
+      clr_start_o => a_clr_start, clr_color_o => a_clr_color,
+      clr_depth_o => a_clr_depth, clr_done_i => a_clr_done,
+      frame_start_valid_o => a_fs_valid, frame_start_ready_i => a_fs_ready,
+      frame_done_i => dp_frame_done
     );
 
-  u_vga : entity work.vga_scanout
+  u_stub : entity work.scene_stub
+    generic map (DEPTH_W => DEPTH_W)
     port map (
-      clk_i => clk, rst_n_i => rst_s, pix_en_i => pix_en,
-      fb_raddr_o => scan_addr, fb_rdata_i => scan_data,
-      vga_r_o => vga_r, vga_g_o => vga_g, vga_b_o => vga_b,
-      vga_hs_n_o => vga_hs_n, vga_vs_n_o => vga_vs_n
+      clk_i => clk, rst_n_i => rst_s,
+      start_valid_i => a_fs_valid, start_ready_o => a_fs_ready,
+      out_valid_o => s_valid, out_ready_i => s_ready,
+      out_v0_x_o => s_v0x, out_v0_y_o => s_v0y,
+      out_v1_x_o => s_v1x, out_v1_y_o => s_v1y,
+      out_v2_x_o => s_v2x, out_v2_y_o => s_v2y,
+      out_v0_z_o => s_z0, out_v1_z_o => s_z1, out_v2_z_o => s_z2,
+      out_color_o => s_color, out_last_o => s_last
     );
 
-  ce_depth <= depth_clear(DEPTH_W);   -- rule 14: clear to 2^D - 1
+  u_dp : entity work.draw_pipeline
+    generic map (DEPTH_W => DEPTH_W, INTERP => INTERP)
+    port map (
+      clk_i => clk, rst_n_i => rst_s,
+      in_valid_i => s_valid, in_ready_o => s_ready,
+      in_v0_x_i => s_v0x, in_v0_y_i => s_v0y,
+      in_v1_x_i => s_v1x, in_v1_y_i => s_v1y,
+      in_v2_x_i => s_v2x, in_v2_y_i => s_v2y,
+      in_v0_z_i => s_z0, in_v1_z_i => s_z1, in_v2_z_i => s_z2,
+      in_color_i => s_color, in_last_i => s_last,
+      fb_we_o => dp_fb_we, fb_waddr_o => dp_fb_addr, fb_wdata_o => dp_fb_data,
+      e4_req_o => reqs(MEM_CLIENT_E4), e4_req_ready_i => readys(MEM_CLIENT_E4),
+      mem_rsp_i => mem_rsp,
+      e6_req_o => reqs(MEM_CLIENT_E6), e6_req_ready_i => readys(MEM_CLIENT_E6),
+      tri_done_o => open, frame_done_o => dp_frame_done
+    );
 
   u_clear : entity work.clear_engine
     generic map (DEPTH_W => DEPTH_W)
     port map (
       clk_i => clk, rst_n_i => rst_s,
-      start_i => ce_start, color_i => BRINGUP_COLOR, depth_i => ce_depth,
-      busy_o => ce_busy, done_o => ce_done,
+      start_i => a_clr_start, color_i => a_clr_color, depth_i => a_clr_depth,
+      busy_o => open, done_o => a_clr_done,
       fb_we_o => ce_fb_we, fb_waddr_o => ce_fb_addr, fb_wdata_o => ce_fb_data,
       mem_ready_i => mem_ready,
-      mem_req_valid_o => ce_req_v, mem_req_ready_i => ready_clr,
+      mem_req_valid_o => ce_req_v, mem_req_ready_i => readys(MEM_CLIENT_CLEAR),
       mem_req_we_o => ce_req_we, mem_req_addr_o => ce_req_addr,
       mem_req_wdata_o => ce_req_wdata
     );
+  reqs(MEM_CLIENT_CLEAR) <= (valid => ce_req_v, we => ce_req_we, addr => ce_req_addr,
+                             wdata => to_mem_data(ce_req_wdata));
 
-  u_e6 : entity work.writeback
-    generic map (DEPTH_W => DEPTH_W)
-    port map (
-      clk => clk, rst_n => rst_s,
-      pass_valid => e6_valid, pass_ready => e6_ready,
-      pass_x => e6_x, pass_y => e6_y, pass_z => e6_z, pass_color => e6_color,
-      fb_we => e6_fb_we, fb_waddr => e6_fb_addr, fb_wdata => e6_fb_data,
-      mem_req_valid => e6_req_v, mem_req_ready => ready_e6,
-      mem_req_we => e6_req_we, mem_req_addr => e6_req_addr,
-      mem_req_wdata => e6_req_wdata
-    );
+  u_mux : entity work.mem_mux
+    port map (reqs_i => reqs, readys_o => readys, req_o => mem_req, req_ready_i => mem_req_ready);
 
   u_mem : entity work.mem_ctrl_bram
     generic map (DEPTH_W => DEPTH_W)
-    port map (
-      clk_i => clk, rst_n_i => rst_s,
-      req => mem_req, req_ready => mem_req_ready,
-      rsp => mem_rsp, mem_ready => mem_ready
-    );
+    port map (clk_i => clk, rst_n_i => rst_s,
+              req => mem_req, req_ready => mem_req_ready, rsp => mem_rsp, mem_ready => mem_ready);
 
-  ---------------------------------------------------------------------------
-  -- framebuffer write port: clear engine first, then E6 (replaced by N4)
-  ---------------------------------------------------------------------------
-  fb_we    <= ce_fb_we or e6_fb_we;
-  fb_waddr <= ce_fb_addr when ce_fb_we = '1' else e6_fb_addr;
-  fb_wdata <= ce_fb_data when ce_fb_we = '1' else e6_fb_data;
+  -- framebuffer write port: clear engine first, then draw_pipeline (they never overlap:
+  -- Block A starts the stub only after clr_done)
+  fb_we    <= ce_fb_we or dp_fb_we;
+  fb_waddr <= ce_fb_addr when ce_fb_we = '1' else dp_fb_addr;
+  fb_wdata <= ce_fb_data when ce_fb_we = '1' else dp_fb_data;
 
-  ---------------------------------------------------------------------------
-  -- memory controller port: clear, then E6, then E4 (replaced by N4)
-  -- a client's ready may depend on the other clients' valid, never on its own
-  ---------------------------------------------------------------------------
-  ce_req <= (valid => ce_req_v, we => ce_req_we, addr => ce_req_addr,
-             wdata => to_mem_data(ce_req_wdata));
-  e6_req <= (valid => e6_req_v, we => e6_req_we, addr => e6_req_addr,
-             wdata => to_mem_data(e6_req_wdata));
+  u_fb : entity work.framebuffer
+    port map (clk_i => clk, wr_en_i => fb_we, wr_addr_i => fb_waddr, wr_data_i => fb_wdata,
+              rd_addr_i => scan_addr, rd_data_o => scan_data);
 
-  reqs(MEM_CLIENT_CLEAR) <= ce_req;
-  reqs(MEM_CLIENT_E6)    <= e6_req;
-  reqs(MEM_CLIENT_E4)    <= e4_req;
+  u_vga : entity work.vga_scanout
+    port map (clk_i => clk, rst_n_i => rst_s, pix_en_i => pix_en,
+              fb_raddr_o => scan_addr, fb_rdata_i => scan_data,
+              vga_r_o => vga_r, vga_g_o => vga_g, vga_b_o => vga_b,
+              vga_hs_n_o => vga_hs_n, vga_vs_n_o => vga_vs_n);
 
-  pick : process (all)
+  -- status
+  process (clk)
   begin
-    grant <= MEM_CLIENT_CLEAR;
-    for i in MEM_CLIENTS - 1 downto 0 loop   -- lowest index is assigned last, so it wins
-      if reqs(i).valid = '1' then
-        grant <= i;
+    if rising_edge(clk) then
+      if rst_s = '0' or start_i = '1' then
+        frame_done_r <= '0';
+      elsif a_done = '1' then
+        frame_done_r <= '1';
       end if;
-    end loop;
+    end if;
   end process;
 
-  mem_req   <= reqs(grant);
-  ready_clr <= mem_req_ready when grant = MEM_CLIENT_CLEAR else '0';
-  ready_e6  <= mem_req_ready when grant = MEM_CLIENT_E6    else '0';
-  ready_e4  <= mem_req_ready when grant = MEM_CLIENT_E4    else '0';
+  busy_o       <= a_busy;
+  frame_done_o <= frame_done_r;
+  error_o      <= a_err;
 
   -- synthesis translate_off
   checks : process (clk)
@@ -200,101 +206,9 @@ begin
     if rising_edge(clk) then
       assert not (mem_req.valid = '1' and mem_ready = '0')
         report "gpu_top: request raised before mem_ready" severity failure;
-      assert not (ce_fb_we = '1' and e6_fb_we = '1')
-        report "gpu_top: clear engine and E6 both write the framebuffer" severity failure;
+      assert not (ce_fb_we = '1' and dp_fb_we = '1')
+        report "gpu_top: clear engine and draw_pipeline both write the framebuffer" severity failure;
     end if;
   end process;
   -- synthesis translate_on
-
-  ---------------------------------------------------------------------------
-  -- bring-up sequencer (stands in for Block A and E4, goes away in Integration 2)
-  ---------------------------------------------------------------------------
-  sequencer : process (clk)
-  begin
-    if rising_edge(clk) then
-      ce_start <= '0';
-      if rst_s = '0' then
-        seq      <= Q_START;
-        idx      <= 0;
-        e6_valid <= '0';
-        e4_req   <= MEM_REQ_IDLE;
-      else
-        case seq is
-          -- 1. clear (color buffer + depth buffer). The engine waits for
-          --    mem_ready by itself, so start can go out right after reset
-          when Q_START =>
-            ce_start <= '1';
-            seq      <= Q_CLEAR_WAIT;
-
-          when Q_CLEAR_WAIT =>
-            if ce_done = '1' then
-              idx <= 0;
-              seq <= Q_FRAG_PRESENT;
-            end if;
-
-          -- 2. fragments through E6, one at a time
-          when Q_FRAG_PRESENT =>
-            e6_x     <= to_unsigned(TEST_X(idx), 9);
-            e6_y     <= to_unsigned(TEST_Y(idx), 8);
-            e6_z     <= to_unsigned(TEST_Z(idx), DEPTH_W);
-            e6_color <= TEST_COLOR(idx);
-            e6_valid <= '1';
-            seq      <= Q_FRAG_ACCEPT;
-
-          when Q_FRAG_ACCEPT =>
-            if e6_ready = '1' then          -- transfer happens on this edge
-              e6_valid <= '0';
-              seq      <= Q_FRAG_IDLE;
-            end if;
-
-          when Q_FRAG_IDLE =>               -- E6 is ready again once its depth write was accepted
-            if e6_ready = '1' then
-              if idx = N_TEST_PIX - 1 then
-                idx <= 0;
-                seq <= Q_RD_REQ;
-              else
-                idx <= idx + 1;
-                seq <= Q_FRAG_PRESENT;
-              end if;
-            end if;
-
-          -- 3. depth readback through the E4 slot
-          when Q_RD_REQ =>
-            e4_req <= (valid => '1', we => '0',
-                       addr  => to_unsigned(depth_check_addr(idx), MEM_ADDR_W),
-                       wdata => (others => '0'));
-            seq    <= Q_RD_ACCEPT;
-
-          when Q_RD_ACCEPT =>
-            if ready_e4 = '1' then
-              e4_req.valid <= '0';
-              seq          <= Q_RD_RSP;
-            end if;
-
-          when Q_RD_RSP =>
-            if mem_rsp.valid = '1' then
-              -- synthesis translate_off
-              assert mem_rsp.rdata(DEPTH_W - 1 downto 0) = depth_check_exp(idx)
-                report "gpu_top bring-up: depth word " &
-                       integer'image(depth_check_addr(idx)) & " wrong"
-                severity failure;
-              -- synthesis translate_on
-              if idx = N_DEPTH_CHECKS - 1 then
-                -- synthesis translate_off
-                report "gpu_top bring-up: clear, E6 writes and depth readback done";
-                -- synthesis translate_on
-                seq <= Q_DONE;
-              else
-                idx <= idx + 1;
-                seq <= Q_RD_REQ;
-              end if;
-            end if;
-
-          when Q_DONE =>
-            null;
-        end case;
-      end if;
-    end if;
-  end process;
-
 end architecture rtl;
