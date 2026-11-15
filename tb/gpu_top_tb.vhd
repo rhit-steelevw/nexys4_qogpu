@@ -36,6 +36,7 @@ begin
   clk <= not clk after CLK_PERIOD / 2 when not done;
 
   dut : entity work.gpu_top
+    generic map (SCENE => "STUB")      -- NEW: keeps the byte-for-byte Integration 2 check
     port map (
       clk => clk, rst_n => rst_n, start_i => start,
       vga_r => vga_r, vga_g => vga_g, vga_b => vga_b,

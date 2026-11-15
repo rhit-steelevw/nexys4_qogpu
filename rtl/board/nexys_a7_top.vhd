@@ -12,6 +12,12 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 entity nexys_a7_top is
+  generic (
+    -- passed to gpu_top. build_bit.tcl sets INIT_FILE to the
+    -- absolute path of rtl/data/cube_init.txt (synthesis does not run in rtl/).
+    SCENE     : string := "CUBE";
+    INIT_FILE : string := "data/cube_init.txt"
+  );
   port (
     CLK100MHZ  : in  std_logic;
     CPU_RESETN : in  std_logic;
@@ -43,6 +49,7 @@ architecture rtl of nexys_a7_top is
   signal auto_done : std_logic := '0';
 begin
   u_gpu : entity work.gpu_top
+    generic map (SCENE => SCENE, INIT_FILE => INIT_FILE)
     port map (
       clk => CLK100MHZ, rst_n => CPU_RESETN, start_i => start,
       vga_r => r3, vga_g => g3, vga_b => b2,

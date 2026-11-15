@@ -15,11 +15,13 @@ use work.qogpu_pkg.all;
 use work.qogpu_fx_pkg.all;
 use work.raster_pkg.all;
 use work.mem_if_pkg.all;
+use work.shade_pkg.all;
 
 entity draw_pipeline is
   generic (
     DEPTH_W : positive := 8;
-    INTERP  : boolean  := true    -- false: E3 passes z0 (flat-depth scenes only, timing fallback)
+    INTERP  : boolean  := true;   -- false: E3 passes z0 (flat-depth scenes only, timing fallback)
+    SHADE   : boolean  := false   -- depth-cue colour between E4 and E6 (E5 slot)
   );
   port (
     clk_i   : in  std_logic;
@@ -68,6 +70,7 @@ architecture rtl of draw_pipeline is
   signal p_z              : unsigned(DEPTH_W - 1 downto 0);
   signal p_kill, p_eot, p_eof : std_logic;
   signal p_color          : std_logic_vector(7 downto 0);
+  signal e6_color         : std_logic_vector(7 downto 0);     -- after the E5 slot
   -- E4 memory side
   signal e4_v    : std_logic;
   signal e4_addr : unsigned(16 downto 0);
@@ -118,12 +121,15 @@ begin
       pass_kill => p_kill, pass_eot => p_eot, pass_eof => p_eof, pass_color => p_color
     );
 
+  -- E5 slot: depth cue (MVP shading); texturing replaces it later.
+  e6_color <= depth_cue(p_color, p_z) when SHADE else p_color;
+
   u_e6 : entity work.writeback
     generic map (DEPTH_W => DEPTH_W)
     port map (
       clk => clk_i, rst_n => rst_n_i,
       pass_valid => p_valid, pass_ready => p_ready,
-      pass_x => p_x, pass_y => p_y, pass_z => p_z, pass_color => p_color,
+      pass_x => p_x, pass_y => p_y, pass_z => p_z, pass_color => e6_color,
       pass_kill => p_kill, pass_eot => p_eot, pass_eof => p_eof,
       fb_we => fb_we_o, fb_waddr => fb_waddr_o, fb_wdata => fb_wdata_o,
       mem_req_valid => e6_v, mem_req_ready => e6_req_ready_i, mem_req_we => e6_we,

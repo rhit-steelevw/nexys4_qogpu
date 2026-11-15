@@ -64,7 +64,7 @@ architecture rtl of scene_stub is
 
   type state_t is (IDLE, SEND0, SEND1);
   signal state : state_t := IDLE;
-  signal cur   : tri_rec_t;
+  signal cur   : tri_rec_t := SCENE(0);   -- init: integer fields start at integer'low otherwise
 begin
   start_ready_o <= '1' when state = IDLE else '0';
   out_valid_o   <= '0' when state = IDLE else '1';

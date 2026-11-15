@@ -6,6 +6,13 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 entity triangle_fetch is
+  generic (
+    -- Which cube faces to fetch, bit f = face f.
+    -- Default = all 12, today's behaviour. The MVP sets "100000000001"
+    -- (faces 1 and 12). Selected faces are presented in ascending order and
+    -- triangle_last_o goes on the highest selected face.
+    FACE_MASK : std_logic_vector(1 to 12) := (others => '1')
+  );
   port (
     clk_i  : in std_logic;
     rstn_i : in std_logic; -- Synchronous active-low shared pipeline reset.
@@ -43,6 +50,47 @@ architecture rtl of triangle_fetch is
   constant WORDS_PER_FACE   : positive := 3;
   constant WORDS_PER_VERTEX : positive := 6;
 
+  -- Face selection, fixed at elaboration (a 12-entry table, not a search)
+  type face_tab_t is array (1 to FACE_COUNT) of natural range 1 to FACE_COUNT;
+
+  function find_first_face(m : std_logic_vector(1 to FACE_COUNT)) return natural is
+  begin
+    for f in 1 to FACE_COUNT loop
+      if m(f) = '1' then
+        return f;
+      end if;
+    end loop;
+    return 1;
+  end function;
+
+  function find_last_face(m : std_logic_vector(1 to FACE_COUNT)) return natural is
+  begin
+    for f in FACE_COUNT downto 1 loop
+      if m(f) = '1' then
+        return f;
+      end if;
+    end loop;
+    return FACE_COUNT;
+  end function;
+
+  -- NEXT(f) = next selected face above f (entries for unselected f are unused)
+  function next_table(m : std_logic_vector(1 to FACE_COUNT)) return face_tab_t is
+    variable t : face_tab_t := (others => 1);
+  begin
+    for f in 1 to FACE_COUNT loop
+      for g in FACE_COUNT downto f + 1 loop
+        if m(g) = '1' then
+          t(f) := g;
+        end if;
+      end loop;
+    end loop;
+    return t;
+  end function;
+
+  constant FIRST_FACE : natural range 1 to FACE_COUNT := find_first_face(FACE_MASK);
+  constant LAST_FACE  : natural range 1 to FACE_COUNT := find_last_face(FACE_MASK);
+  constant NEXT_FACE  : face_tab_t := next_table(FACE_MASK);
+
   type state_t is (IDLE, ID_ISSUE, ID_WAIT, ID_CAPTURE,
                   COORD_ISSUE, COORD_WAIT, COORD_CAPTURE,
                   PRESENT_TRIANGLE, FAULT);
@@ -60,11 +108,13 @@ architecture rtl of triangle_fetch is
   signal vertex_ids : ids_t;
   signal coordinates : coords_t;
 begin
+  assert FACE_MASK /= (FACE_MASK'range => '0')
+    report "triangle_fetch: FACE_MASK selects no faces" severity failure;
   mem_addr_o <= mem_addr_r;
   frame_start_ready_o <= '1' when state = IDLE else '0';
   triangle_valid_o <= '1' when state = PRESENT_TRIANGLE else '0';
   triangle_last_o <= '1' when state = PRESENT_TRIANGLE
-                              and face_id = FACE_COUNT else '0';
+                              and face_id = LAST_FACE else '0';
   err_o <= error_r;
 
   vertex_a_id_o <= vertex_ids(0);
@@ -98,7 +148,7 @@ begin
         case state is
           when IDLE =>
             if frame_start_valid_i = '1' then
-              face_id <= 1;
+              face_id <= FIRST_FACE;
               vertex_slot <= 0;
               axis <= 0;
               state <= ID_ISSUE;
@@ -153,10 +203,10 @@ begin
           when PRESENT_TRIANGLE =>
             -- Hold the entire payload, including last, until C accepts it.
             if triangle_ready_i = '1' then
-              if face_id = FACE_COUNT then
+              if face_id = LAST_FACE then
                 state <= IDLE;
               else
-                face_id <= face_id + 1;
+                face_id <= NEXT_FACE(face_id);
                 vertex_slot <= 0;
                 axis <= 0;
                 state <= ID_ISSUE;

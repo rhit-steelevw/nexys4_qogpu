@@ -28,6 +28,7 @@ This document provides design decisions, with reasons, for each numeric or round
 | **14** | Order | Faces in face-table order and pixels in row-major ($y$ then $x$) | Makes depth ties deterministic, making every frame deterministic |
 | **15** | Texture addressing | Deferred until after MVP | Not used by two flat, colored triangles |
 | **16** | Ada representation | Hybrid such that every operation works with a raw integer. Ada: `Qogpu_Fixed` and `Qogpu_Raster` in `sw/ada/ref/src/`. VHDL: `rtl/qogpu_fx_pkg.vhd` | Using a hybrid approach allows strong typing and bit-exact representation. `tb/qogpu_fx_pkg_tb.vhd` checks the VHDL against the Ada output |
+| **17** | Depth-cue shading | Per fragment, between E4 and E6. $z_8$ = top 8 bits of depth, $k = 256 - (z_8 \gg 1)$, each RGB332 field $f' = (f \cdot k) \gg 8$ (R 3 bits, G 3 bits, B 2 bits) | Brightness runs from 100 % at depth 0 to about 50 % at depth 255. Base red `0xE0` gives `0xC0` at depth 54 and `0x80` at depth 201 (`rtl/shade_pkg.vhd`) |
 
 ---
 

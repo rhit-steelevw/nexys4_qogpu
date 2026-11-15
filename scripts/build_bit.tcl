@@ -20,7 +20,15 @@ foreach f [lrange $argv 3 end] {
 }
 read_xdc [file join $repo $xdc]
 
-synth_design -top $top -part $part
+# NEW (Integration 3): asset ROM image for asset_memory, absolute path. A relative
+# path would be resolved from Vivado's run directory, not from rtl/.
+# Keep the repository path free of spaces.
+set init_file [file join $repo rtl data cube_init.txt]
+if {![file exists $init_file]} {
+    puts "build_bit: missing $init_file"
+    exit 2
+}
+synth_design -top $top -part $part -generic "INIT_FILE=$init_file"
 report_utilization -file [file join $out ${top}_util_synth.rpt]
 
 opt_design

@@ -21,9 +21,12 @@ RASTER_SRCS = rtl/qogpu_pkg.vhd rtl/qogpu_fx_pkg.vhd rtl/raster_pkg.vhd rtl/rast
 
 MEMIF_SRCS = rtl/qogpu_pkg.vhd rtl/mem_if_pkg.vhd
 PIPE_SRCS  = rtl/qogpu_pkg.vhd rtl/qogpu_fx_pkg.vhd rtl/raster_pkg.vhd rtl/mem_if_pkg.vhd \
+             rtl/shade_pkg.vhd \
              rtl/tri_setup.vhd rtl/raster_scan.vhd rtl/depth_interp.vhd rtl/rasterizer.vhd \
              rtl/depth_test.vhd rtl/writeback.vhd rtl/draw_pipeline.vhd rtl/scene_stub.vhd
-TOP_SRCS   = $(PIPE_SRCS) rtl/framebuffer.vhd rtl/clear_engine.vhd rtl/mem_mux.vhd \
+FRONT_SRCS = rtl/fx_mul.vhd rtl/asset_memory.vhd rtl/block_b.vhd rtl/block_c.vhd \
+             rtl/triangle_transform.vhd
+TOP_SRCS   = $(PIPE_SRCS) $(FRONT_SRCS) rtl/framebuffer.vhd rtl/clear_engine.vhd rtl/mem_mux.vhd \
              rtl/mem_ctrl_bram.vhd rtl/vga_timing.vhd rtl/vga_scanout.vhd rtl/block_a.vhd \
              rtl/gpu_top.vhd
 BOARD_SRCS = $(TOP_SRCS) rtl/board/nexys_a7_top.vhd
@@ -37,7 +40,9 @@ SIM_TARGETS = sim-framebuffer sim-clear-engine sim-counter sim-bram sim-bram-w16
               sim-vga-timing sim-vga-timing-100 sim-vga-scanout sim-vga-scanout-100 \
               sim-fx-mul sim-fx-mul-trunc sim-fx-pkg sim-frame-dump sim-tri-setup \
               sim-raster-scan sim-depth-interp sim-depth-interp-bypass sim-rasterizer \
-              sim-depth-test sim-writeback sim-draw-pipeline sim-draw-pipeline-blue-first sim-gpu-top
+              sim-depth-test sim-writeback sim-draw-pipeline sim-draw-pipeline-blue-first sim-gpu-top \
+              sim-command-controller sim-triangle-fetch sim-triangle-fetch-mask sim-vertex-transform \
+              sim-shade-pkg sim-triangle-transform sim-gpu-top-cube
 
 .PHONY: sim $(SIM_TARGETS) $(WAVE_TARGETS) synth-framebuffer synth-bram synth-fx-mul synth-tri-setup synth-rasterizer \
         vectors tools build clean bit program
@@ -65,6 +70,27 @@ sim-draw-pipeline-blue-first:
 
 sim-gpu-top:
 	$(SIM) gpu_top_tb $(TOP_SRCS) tb/frame_dump_pkg.vhd tb/gpu_top_tb.vhd
+
+sim-command-controller:
+	$(SIM) command_controller_tb rtl/qogpu_pkg.vhd rtl/block_a.vhd tb/command_controller_tb.vhd
+
+sim-triangle-fetch:
+	$(SIM) triangle_fetch_tb rtl/qogpu_pkg.vhd rtl/asset_memory.vhd rtl/block_b.vhd tb/triangle_fetch_tb.vhd
+
+sim-triangle-fetch-mask:
+	$(SIM) triangle_fetch_mask_tb rtl/qogpu_pkg.vhd rtl/asset_memory.vhd rtl/block_b.vhd tb/triangle_fetch_mask_tb.vhd
+
+sim-vertex-transform:
+	$(SIM) vertex_transform_tb rtl/qogpu_fx_pkg.vhd rtl/fx_mul.vhd rtl/block_c.vhd tb/vertex_transform_tb.vhd
+
+sim-shade-pkg:
+	$(SIM) shade_pkg_tb rtl/qogpu_pkg.vhd rtl/shade_pkg.vhd tb/shade_pkg_tb.vhd
+
+sim-triangle-transform:
+	$(SIM) triangle_transform_tb rtl/qogpu_pkg.vhd rtl/qogpu_fx_pkg.vhd rtl/fx_mul.vhd 	    rtl/block_c.vhd rtl/triangle_transform.vhd tb/triangle_transform_tb.vhd
+
+sim-gpu-top-cube:
+	$(SIM) gpu_top_cube_tb $(TOP_SRCS) tb/frame_dump_pkg.vhd tb/gpu_top_cube_tb.vhd
 
 bit:
 	$(BIT) nexys_a7_top $(PART) $(XDC) $(BOARD_SRCS)

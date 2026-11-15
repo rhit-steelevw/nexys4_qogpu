@@ -1,6 +1,10 @@
--- gpu_top.vhd : Integration 2 top level (RQ-99), SKELETON
+-- gpu_top.vhd : top level (RQ-99 Integration 2, Integration 3 front end)
 --
--- Block A (command_controller) -> scene_stub -> draw_pipeline (D..E6)
+-- SCENE = "CUBE" (default): Block A -> asset_memory -> Block B (triangle_fetch,
+--   faces FACE_MASK) -> triangle_transform (Block C x3) -> draw_pipeline (D..E6,
+--   SHADE on). Rotation stays identity: A's write port is tied off.
+-- SCENE = "STUB": Block A -> scene_stub -> draw_pipeline (Integration 2 image).
+-- Both drive the same seam signals (s_*); only one generate exists.
 -- clear_engine + draw_pipeline share the framebuffer write port and, through
 -- mem_mux, the depth-buffer memory controller (BRAM back-end).
 -- VGA scan-out reads the framebuffer. One clock (100 MHz), pixel enable 1 in 4.
@@ -19,7 +23,10 @@ entity gpu_top is
   generic (
     DEPTH_W : positive range 1 to 16 := 8;   -- later from RQ-113's board config package
     INTERP  : boolean := true;
-    PIX_DIV : positive := 4                  -- 100 MHz -> 25 MHz pixel enable
+    PIX_DIV : positive := 4;                 -- 100 MHz -> 25 MHz pixel enable
+    SCENE     : string := "CUBE";                               -- "CUBE" | "STUB"
+    FACE_MASK : std_logic_vector(1 to 12) := "100000000001";    -- MVP: faces 1 and 12
+    INIT_FILE : string := "data/cube_init.txt"                  -- asset ROM image
   );
   port (
     clk, rst_n         : in  std_logic;
@@ -45,7 +52,11 @@ architecture rtl of gpu_top is
   signal a_fs_valid, a_fs_ready : std_logic;
   signal a_done, a_busy, a_err  : std_logic;
 
-  -- scene_stub -> draw_pipeline
+  -- Blocks B and C (CUBE scene only)
+  signal a_cos_x, a_sin_x, a_cos_y, a_sin_y, a_cos_z, a_sin_z : signed(31 downto 0);
+  signal b_err : std_logic := '0';
+
+  -- seam: scene_stub or triangle_transform -> draw_pipeline
   signal s_valid, s_ready : std_logic;
   signal s_v0x, s_v0y, s_v1x, s_v1y, s_v2x, s_v2y : q16_t;
   signal s_z0, s_z1, s_z2 : unsigned(DEPTH_W - 1 downto 0);
@@ -105,31 +116,82 @@ begin
     port map (
       clk_i => clk, rstn_i => rst_s,
       start_i => start_i, busy_o => a_busy, done_o => a_done,
-      err_i => '0', error_o => a_err,                       -- no Block B yet
+      err_i => b_err, error_o => a_err,                     -- '0' in the STUB scene
       rot_wr_en_i => '0', rot_wr_sel_i => (others => '0'), rot_wr_data_i => (others => '0'),
-      cos_x_o => open, sin_x_o => open, cos_y_o => open,
-      sin_y_o => open, cos_z_o => open, sin_z_o => open,
+      cos_x_o => a_cos_x, sin_x_o => a_sin_x, cos_y_o => a_cos_y,   -- identity (MVP)
+      sin_y_o => a_sin_y, cos_z_o => a_cos_z, sin_z_o => a_sin_z,
       clr_start_o => a_clr_start, clr_color_o => a_clr_color,
       clr_depth_o => a_clr_depth, clr_done_i => a_clr_done,
       frame_start_valid_o => a_fs_valid, frame_start_ready_i => a_fs_ready,
       frame_done_i => dp_frame_done
     );
 
-  u_stub : entity work.scene_stub
-    generic map (DEPTH_W => DEPTH_W)
-    port map (
-      clk_i => clk, rst_n_i => rst_s,
-      start_valid_i => a_fs_valid, start_ready_o => a_fs_ready,
-      out_valid_o => s_valid, out_ready_i => s_ready,
-      out_v0_x_o => s_v0x, out_v0_y_o => s_v0y,
-      out_v1_x_o => s_v1x, out_v1_y_o => s_v1y,
-      out_v2_x_o => s_v2x, out_v2_y_o => s_v2y,
-      out_v0_z_o => s_z0, out_v1_z_o => s_z1, out_v2_z_o => s_z2,
-      out_color_o => s_color, out_last_o => s_last
-    );
+  assert SCENE = "CUBE" or SCENE = "STUB"
+    report "gpu_top: SCENE must be CUBE or STUB" severity failure;
+
+  g_stub : if SCENE = "STUB" generate
+    u_stub : entity work.scene_stub
+      generic map (DEPTH_W => DEPTH_W)
+      port map (
+        clk_i => clk, rst_n_i => rst_s,
+        start_valid_i => a_fs_valid, start_ready_o => a_fs_ready,
+        out_valid_o => s_valid, out_ready_i => s_ready,
+        out_v0_x_o => s_v0x, out_v0_y_o => s_v0y,
+        out_v1_x_o => s_v1x, out_v1_y_o => s_v1y,
+        out_v2_x_o => s_v2x, out_v2_y_o => s_v2y,
+        out_v0_z_o => s_z0, out_v1_z_o => s_z1, out_v2_z_o => s_z2,
+        out_color_o => s_color, out_last_o => s_last
+      );
+    b_err <= '0';
+  end generate;
+
+  g_cube : if SCENE = "CUBE" generate
+    -- Block B -> triangle_transform payload
+    signal rom_addr : unsigned(9 downto 0);
+    signal rom_data : std_logic_vector(31 downto 0);
+    signal t_valid, t_ready, t_last : std_logic;
+    signal va_id, vb_id, vc_id : unsigned(31 downto 0);
+    signal va_x, va_y, va_z, vb_x, vb_y, vb_z, vc_x, vc_y, vc_z : signed(31 downto 0);
+  begin
+    u_rom : entity work.asset_memory
+      generic map (INIT_FILE => INIT_FILE)
+      port map (clk => clk, addr => rom_addr, data => rom_data);
+
+    u_b : entity work.triangle_fetch
+      generic map (FACE_MASK => FACE_MASK)
+      port map (
+        clk_i => clk, rstn_i => rst_s,
+        frame_start_valid_i => a_fs_valid, frame_start_ready_o => a_fs_ready,
+        mem_addr_o => rom_addr, mem_data_i => rom_data,
+        triangle_valid_o => t_valid, triangle_ready_i => t_ready,
+        triangle_last_o => t_last, err_o => b_err,
+        vertex_a_id_o => va_id, vertex_a_x_o => va_x, vertex_a_y_o => va_y, vertex_a_z_o => va_z,
+        vertex_b_id_o => vb_id, vertex_b_x_o => vb_x, vertex_b_y_o => vb_y, vertex_b_z_o => vb_z,
+        vertex_c_id_o => vc_id, vertex_c_x_o => vc_x, vertex_c_y_o => vc_y, vertex_c_z_o => vc_z
+      );
+
+    u_c : entity work.triangle_transform
+      generic map (DEPTH_W => DEPTH_W)
+      port map (
+        clk_i => clk, rstn_i => rst_s,
+        tri_valid_i => t_valid, tri_ready_o => t_ready, tri_last_i => t_last,
+        vertex_a_id_i => va_id, vertex_b_id_i => vb_id, vertex_c_id_i => vc_id,
+        vertex_a_x_i => va_x, vertex_a_y_i => va_y, vertex_a_z_i => va_z,
+        vertex_b_x_i => vb_x, vertex_b_y_i => vb_y, vertex_b_z_i => vb_z,
+        vertex_c_x_i => vc_x, vertex_c_y_i => vc_y, vertex_c_z_i => vc_z,
+        cos_x_i => a_cos_x, sin_x_i => a_sin_x, cos_y_i => a_cos_y,
+        sin_y_i => a_sin_y, cos_z_i => a_cos_z, sin_z_i => a_sin_z,
+        out_valid_o => s_valid, out_ready_i => s_ready,
+        out_v0_x_o => s_v0x, out_v0_y_o => s_v0y,
+        out_v1_x_o => s_v1x, out_v1_y_o => s_v1y,
+        out_v2_x_o => s_v2x, out_v2_y_o => s_v2y,
+        out_v0_z_o => s_z0, out_v1_z_o => s_z1, out_v2_z_o => s_z2,
+        out_color_o => s_color, out_last_o => s_last
+      );
+  end generate;
 
   u_dp : entity work.draw_pipeline
-    generic map (DEPTH_W => DEPTH_W, INTERP => INTERP)
+    generic map (DEPTH_W => DEPTH_W, INTERP => INTERP, SHADE => SCENE = "CUBE")
     port map (
       clk_i => clk, rst_n_i => rst_s,
       in_valid_i => s_valid, in_ready_o => s_ready,
