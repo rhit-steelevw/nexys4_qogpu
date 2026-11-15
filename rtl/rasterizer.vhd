@@ -7,7 +7,6 @@
 -- INTERP = false: E3 passes z_0 (bit-exact for the MVP scene only, where each
 -- triangle has one depth).
 --
--- NEW (Integration 2): H1 drain gate, docs/spec/memory_interface.md.
 --   H1: E1 does not start the next triangle until it sees tri_done from E6 for
 --       the current one. Implemented here, in front of raster_scan, so the
 --       bit-exact E1/E2 block is unchanged:
@@ -45,17 +44,17 @@ entity rasterizer is
     out_eot_o   : out std_logic;
     out_eof_o   : out std_logic;
     out_color_o : out pixel_t;
-    tri_done_i  : in  std_logic          -- NEW: from E6 (H1)
+    tri_done_i  : in  std_logic          -- from E6 (H1)
   );
 end entity;
 
 architecture rtl of rasterizer is
   signal s_valid, s_ready : std_logic;
   signal s_scan           : scan_t;
-  signal scan_in_valid, scan_in_ready : std_logic;   -- NEW
-  signal tri_in_flight    : std_logic := '0';        -- NEW
+  signal scan_in_valid, scan_in_ready : std_logic;
+  signal tri_in_flight    : std_logic := '0';     
 begin
-  -- NEW: H1 gate (combinational mask; tri_in_flight is a flop, so no loop)
+  -- H1 gate (combinational mask; tri_in_flight is a flop, so no loop)
   scan_in_valid <= in_valid_i    and not tri_in_flight;
   in_ready_o    <= scan_in_ready and not tri_in_flight;
 

@@ -1,6 +1,4 @@
 -- E6 write-back: color -> BRAM framebuffer, depth -> memory controller.
--- Integration 2 SKELETON: adds markers (kill/eot/eof) and tri_done/frame_done (H2/H3).
--- Lines not marked NEW are unchanged from main (RQ-95).
 --
 --   kill = 0 : fb_we pulses once; depth write held until mem_req_ready (as before).
 --              eot/eof latched; tri_done/frame_done pulse the cycle AFTER the accept.
@@ -25,13 +23,13 @@ entity writeback is
     fb_we : out std_logic; fb_waddr : out unsigned(16 downto 0); fb_wdata : out std_logic_vector(7 downto 0);
     mem_req_valid : out std_logic; mem_req_ready : in std_logic; mem_req_we : out std_logic;
     mem_req_addr : out unsigned(16 downto 0); mem_req_wdata : out std_logic_vector(DEPTH_W-1 downto 0);
-    -- NEW ports go LAST: tb/tb_writeback.vhd binds by position, so trailing
+    -- Ports go LAST: tb/tb_writeback.vhd binds by position, so trailing
     -- defaulted inputs and unconnected outputs keep it compiling unchanged.
-    pass_kill  : in std_logic := '0';   -- NEW
-    pass_eot   : in std_logic := '0';   -- NEW
-    pass_eof   : in std_logic := '0';   -- NEW
-    tri_done   : out std_logic;         -- NEW: one-cycle pulse, to rasterizer (H1/H2)
-    frame_done : out std_logic          -- NEW: one-cycle pulse, to Block A (H3)
+    pass_kill  : in std_logic := '0';   
+    pass_eot   : in std_logic := '0';   
+    pass_eof   : in std_logic := '0';   
+    tri_done   : out std_logic;         -- one-cycle pulse, to rasterizer (H1/H2)
+    frame_done : out std_logic          -- one-cycle pulse, to Block A (H3)
   );
 end entity;
 
@@ -41,8 +39,8 @@ architecture rtl of writeback is
   signal req_v_r : std_logic := '0';
   signal addr_r  : unsigned(16 downto 0) := (others => '0');
   signal addr_in : unsigned(16 downto 0);
-  signal eot_r, eof_r         : std_logic := '0';   -- NEW: markers of the write in flight
-  signal tri_done_r, frame_done_r : std_logic := '0';   -- NEW
+  signal eot_r, eof_r         : std_logic := '0';   -- markers of the write in flight
+  signal tri_done_r, frame_done_r : std_logic := '0';  
 begin
   addr_in <= resize(pass_y * to_unsigned(320, 9), 17) + resize(pass_x, 17);
 
@@ -55,8 +53,8 @@ begin
   mem_req_valid <= req_v_r;
   mem_req_we    <= '1';
   mem_req_addr  <= addr_r;
-  tri_done      <= tri_done_r;          -- NEW
-  frame_done    <= frame_done_r;        -- NEW
+  tri_done      <= tri_done_r;          
+  frame_done    <= frame_done_r;        
 
   process (clk)
   begin

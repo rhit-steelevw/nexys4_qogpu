@@ -1,5 +1,4 @@
 -- depth_test.vhd : E4 depth test (VHDL-2008, Vivado xsim)
--- Integration 2 SKELETON. Changes from main (RQ-94), each marked NEW:
 --   * marker side-band (kill/eot/eof) and per-fragment color
 --   * HOLD state and the wr_pending port REMOVED. Depth hazards are handled by
 --     docs/spec/memory_interface.md rules H1-H4 and rule 11, and nowhere else:
@@ -14,7 +13,7 @@
 -- rst_n must also reset the memory controller (a late reply to a read accepted
 -- before reset must never be taken as the answer for the next fragment).
 --
--- NEW invariant: a fragment that carries eot or eof is never dropped before E6
+-- A fragment that carries eot or eof is never dropped before E6
 -- (H2/H3 need the marker to reach E6; H4 guarantees one exists per triangle).
 --   frag_kill = 1 or off screen : no memory read.
 --        marker (eot or eof)    -> PASS with pass_kill = 1
@@ -22,7 +21,7 @@
 --   depth fails, marker         -> PASS with pass_kill = 1
 --   depth fails, no marker      -> DROP
 --   depth passes                -> PASS with pass_kill = 0
--- New inputs have defaults; tb/depth_test_tb.vhd only loses its wr_pending line.
+-- Inputs have defaults; tb/depth_test_tb.vhd only loses its wr_pending line.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -35,10 +34,10 @@ entity depth_test is
     frag_valid : in std_logic; frag_ready : out std_logic;
     px : in unsigned(8 downto 0); py : in unsigned(7 downto 0);
     pz : in unsigned(DEPTH_W-1 downto 0); pu, pv : in unsigned(UV_W-1 downto 0);
-    frag_kill  : in std_logic := '0';                                   -- NEW
-    frag_eot   : in std_logic := '0';                                   -- NEW
-    frag_eof   : in std_logic := '0';                                   -- NEW
-    frag_color : in std_logic_vector(7 downto 0) := (others => '0');    -- NEW, RGB332
+    frag_kill  : in std_logic := '0';                                   
+    frag_eot   : in std_logic := '0';                                   
+    frag_eof   : in std_logic := '0';                                   
+    frag_color : in std_logic_vector(7 downto 0) := (others => '0');    -- RGB332
     -- memory-controller interface (depth read)
     mem_req_valid : out std_logic; mem_req_ready : in std_logic; mem_req_addr : out unsigned(16 downto 0);
     mem_rsp_valid : in std_logic; mem_rsp_data : in std_logic_vector(DEPTH_W-1 downto 0);
@@ -46,16 +45,16 @@ entity depth_test is
     pass_valid : out std_logic; pass_ready : in std_logic;
     pass_x : out unsigned(8 downto 0); pass_y : out unsigned(7 downto 0);
     pass_z : out unsigned(DEPTH_W-1 downto 0); pass_u, pass_v : out unsigned(UV_W-1 downto 0);
-    pass_kill  : out std_logic;                                         -- NEW
-    pass_eot   : out std_logic;                                         -- NEW
-    pass_eof   : out std_logic;                                         -- NEW
-    pass_color : out std_logic_vector(7 downto 0)                       -- NEW
-    -- wr_pending REMOVED (NEW): see header
+    pass_kill  : out std_logic;                                         
+    pass_eot   : out std_logic;                                         
+    pass_eof   : out std_logic;                                         
+    pass_color : out std_logic_vector(7 downto 0)                       
+    -- wr_pending REMOVED: see header
   );
 end entity;
 
 architecture rtl of depth_test is
-  type state_t is (IDLE, REQ, WAIT_RSP, COMPARE, PASS, DROP);          -- NEW: no HOLD
+  type state_t is (IDLE, REQ, WAIT_RSP, COMPARE, PASS, DROP);          -- no HOLD
   signal state    : state_t := IDLE;
   signal x_r      : unsigned(8 downto 0);
   signal y_r      : unsigned(7 downto 0);
@@ -63,9 +62,9 @@ architecture rtl of depth_test is
   signal u_r, v_r : unsigned(UV_W-1 downto 0);
   signal addr_r   : unsigned(16 downto 0);
   signal stored_r : unsigned(DEPTH_W-1 downto 0);
-  signal kill_r, eot_r, eof_r : std_logic := '0';                       -- NEW
-  signal color_r  : std_logic_vector(7 downto 0) := (others => '0');    -- NEW
-  signal marker_r : std_logic;                                          -- NEW
+  signal kill_r, eot_r, eof_r : std_logic := '0';                       
+  signal color_r  : std_logic_vector(7 downto 0) := (others => '0');    
+  signal marker_r : std_logic;                                          
   constant FRAME_W : natural := 320;
   constant FRAME_H : natural := 240;
 begin
@@ -80,10 +79,10 @@ begin
   pass_z        <= z_r;
   pass_u        <= u_r;
   pass_v        <= v_r;
-  pass_kill     <= kill_r;                                              -- NEW
-  pass_eot      <= eot_r;                                               -- NEW
-  pass_eof      <= eof_r;                                               -- NEW
-  pass_color    <= color_r;                                             -- NEW
+  pass_kill     <= kill_r;                                              
+  pass_eot      <= eot_r;                                               
+  pass_eof      <= eof_r;                                               
+  pass_color    <= color_r;                                             
 
   process (clk)
   begin
@@ -95,10 +94,10 @@ begin
           when IDLE =>
             if frag_valid = '1' then
               x_r <= px; y_r <= py; z_r <= pz; u_r <= pu; v_r <= pv;
-              eot_r   <= frag_eot;                                      -- NEW
-              eof_r   <= frag_eof;                                      -- NEW
-              color_r <= frag_color;                                    -- NEW
-              kill_r  <= '0';                                           -- NEW
+              eot_r   <= frag_eot;                                      
+              eof_r   <= frag_eof;                                      
+              color_r <= frag_color;                                    
+              kill_r  <= '0';                                           
               addr_r  <= resize(py * to_unsigned(FRAME_W, 9), 17) + resize(px, 17);
               if frag_kill = '1' or px >= to_unsigned(FRAME_W, 9) or py >= to_unsigned(FRAME_H, 8) then
                 if frag_eot = '1' or frag_eof = '1' then

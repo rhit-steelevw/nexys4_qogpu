@@ -1,5 +1,4 @@
 -- Framebuffer + depth-buffer clear engine (RQ-89, depth port for RQ-96)
--- SKELETON for Integration 2, step 0. gpu_top on main already instantiates
 -- this port list; the committed clear_engine.vhd (253f61e) lacks it.
 --
 -- Fills all FB_PIXELS color words and depth words in lock-step:

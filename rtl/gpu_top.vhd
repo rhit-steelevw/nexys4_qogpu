@@ -11,7 +11,6 @@
 --
 -- Port list is FROZEN (plan, Workstream 4): the board wrapper is built against it,
 -- and the Integration 1 bring-up gpu_top exposes the same ports with tie-offs.
--- Merge order: close RQ-96 (gpu_top_tb on the bring-up version) BEFORE replacing it.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
